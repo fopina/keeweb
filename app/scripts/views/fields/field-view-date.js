@@ -1,23 +1,25 @@
-const FieldViewText = require('./field-view-text');
-const Locale = require('../../util/locale');
-const Pikaday = require('pikaday');
-const Format = require('../../util/format');
+import Pikaday from 'pikaday';
+import { DateFormat } from 'util/formatting/date-format';
+import { Locale } from 'util/locale';
+import { FieldViewText } from 'views/fields/field-view-text';
 
-const FieldViewDate = FieldViewText.extend({
-    renderValue: function(value) {
-        let result = value ? Format.dStr(value) : '';
+class FieldViewDate extends FieldViewText {
+    hasOptions = false;
+
+    renderValue(value) {
+        let result = value ? DateFormat.dStr(value) : '';
         if (value && this.model.lessThanNow && value < new Date()) {
             result += ' ' + this.model.lessThanNow;
         }
         return result;
-    },
+    }
 
-    getEditValue: function(value) {
-        return value ? Format.dStr(value) : '';
-    },
+    getEditValue(value) {
+        return value ? DateFormat.dStr(value) : '';
+    }
 
-    startEdit: function() {
-        FieldViewText.prototype.startEdit.call(this);
+    startEdit() {
+        super.startEdit();
         this.picker = new Pikaday({
             field: this.input[0],
             onSelect: this.pickerSelect.bind(this),
@@ -33,34 +35,49 @@ const FieldViewDate = FieldViewText.extend({
                 weekdaysShort: Locale.weekdaysShort
             }
         });
-        _.defer(this.picker.show.bind(this.picker));
-    },
+        this.picker.adjustPosition = this.adjustPickerPosition.bind(this);
+        setTimeout(() => this.picker.show(), 0);
+    }
 
-    fieldValueBlur: function(e) {
-        if (!this.picker) {
-            FieldViewText.prototype.fieldValueBlur.call(this, e);
+    adjustPickerPosition(...args) {
+        window.Pikaday = Pikaday;
+        Pikaday.prototype.adjustPosition.apply(this.picker, args);
+        const shadowSpread = parseInt(this.input.css('--focus-shadow-spread')) || 0;
+        if (shadowSpread) {
+            const isOnTop = this.picker.el.classList.contains('top-aligned');
+            const offset = isOnTop ? -shadowSpread : shadowSpread;
+            const newTop = parseInt(this.picker.el.style.top) + offset;
+            this.picker.el.style.top = `${newTop}px`;
         }
-    },
+    }
 
-    endEdit: function(newVal, extra) {
+    fieldValueBlur(e) {
+        if (!this.picker) {
+            super.fieldValueBlur(e);
+        }
+    }
+
+    endEdit(newVal, extra) {
         if (this.picker) {
-            try { this.picker.destroy(); } catch (e) {}
+            try {
+                this.picker.destroy();
+            } catch (e) {}
             this.picker = null;
         }
         newVal = new Date(newVal);
         if (!newVal || isNaN(newVal.getTime())) {
             newVal = null;
         }
-        FieldViewText.prototype.endEdit.call(this, newVal, extra);
-    },
+        super.endEdit(newVal, extra);
+    }
 
-    pickerClose: function() {
+    pickerClose() {
         this.endEdit(this.input.val());
-    },
+    }
 
-    pickerSelect: function(dt) {
+    pickerSelect(dt) {
         this.endEdit(dt);
     }
-});
+}
 
-module.exports = FieldViewDate;
+export { FieldViewDate };

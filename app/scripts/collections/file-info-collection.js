@@ -1,42 +1,39 @@
-const Backbone = require('backbone');
-const FileInfoModel = require('../models/file-info-model');
-const SettingsStore = require('../comp/settings-store');
+import { Collection } from 'framework/collection';
+import { SettingsStore } from 'comp/settings/settings-store';
+import { FileInfoModel } from 'models/file-info-model';
 
-const FileInfoCollection = Backbone.Collection.extend({
-    model: FileInfoModel,
+class FileInfoCollection extends Collection {
+    static model = FileInfoModel;
 
-    initialize: function () {
-    },
-
-    load: function () {
+    load() {
         return SettingsStore.load('file-info').then(data => {
             if (data) {
-                this.reset(data, {silent: true});
+                for (const item of data) {
+                    this.push(new FileInfoModel(item));
+                }
             }
         });
-    },
-
-    save: function () {
-        SettingsStore.save('file-info', this.toJSON());
-    },
-
-    getLast: function () {
-        return this.first();
-    },
-
-    getMatch: function (storage, name, path) {
-        return this.find(fi => {
-            return (fi.get('storage') || '') === (storage || '') &&
-                (fi.get('name') || '') === (name || '') &&
-                (fi.get('path') || '') === (path || '');
-        });
-    },
-
-    getByName: function(name) {
-        return this.find(file => file.get('name').toLowerCase() === name.toLowerCase());
     }
-});
 
-FileInfoCollection.instance = new FileInfoCollection();
+    save() {
+        SettingsStore.save('file-info', this);
+    }
 
-module.exports = FileInfoCollection;
+    getMatch(storage, name, path) {
+        return this.find(fi => {
+            return (
+                (fi.storage || '') === (storage || '') &&
+                (fi.name || '') === (name || '') &&
+                (fi.path || '') === (path || '')
+            );
+        });
+    }
+
+    getByName(name) {
+        return this.find(file => file.name.toLowerCase() === name.toLowerCase());
+    }
+}
+
+const instance = new FileInfoCollection();
+
+export { instance as FileInfoCollection };

@@ -1,18 +1,23 @@
-const FieldViewText = require('./field-view-text');
-const Timeouts = require('../../const/timeouts');
+import { Timeouts } from 'const/timeouts';
+import { FieldViewText } from 'views/fields/field-view-text';
 
 const MinOpacity = 0.1;
 
-const FieldViewOtp = FieldViewText.extend({
-    otpTimeout: null,
-    otpTickInterval: null,
-    otpValue: null,
-    otpGenerator: null,
-    otpTimeLeft: 0,
-    otpValidUntil: 0,
-    fieldOpacity: null,
+class FieldViewOtp extends FieldViewText {
+    otpTimeout = null;
+    otpTickInterval = null;
+    otpValue = null;
+    otpGenerator = null;
+    otpTimeLeft = 0;
+    otpValidUntil = 0;
+    fieldOpacity = null;
 
-    renderValue: function(value) {
+    constructor(model, options) {
+        super(model, options);
+        this.once('remove', () => this.resetOtp());
+    }
+
+    renderValue(value) {
         if (!value) {
             this.resetOtp();
             return '';
@@ -22,24 +27,23 @@ const FieldViewOtp = FieldViewText.extend({
             this.requestOtpUpdate();
         }
         return this.otpValue;
-    },
+    }
 
-    getEditValue: function(value) {
+    getEditValue(value) {
         return value && value.url;
-    },
+    }
 
-    render: function() {
-        FieldViewText.prototype.render.call(this);
+    getTextValue() {
+        return this.otpValue;
+    }
+
+    render() {
+        super.render();
         this.fieldOpacity = null;
         this.otpTick();
-    },
+    }
 
-    remove: function() {
-        this.resetOtp();
-        FieldViewText.prototype.remove.apply(this, arguments);
-    },
-
-    resetOtp: function() {
+    resetOtp() {
         this.otpGenerator = null;
         this.otpValue = null;
         this.otpTimeLeft = 0;
@@ -52,15 +56,15 @@ const FieldViewOtp = FieldViewText.extend({
             clearInterval(this.otpTickInterval);
             this.otpTickInterval = null;
         }
-    },
+    }
 
-    requestOtpUpdate: function() {
+    requestOtpUpdate() {
         if (this.value) {
             this.value.next(this.otpUpdated.bind(this));
         }
-    },
+    }
 
-    otpUpdated: function(pass, timeLeft) {
+    otpUpdated(pass, timeLeft) {
         if (!this.value || !pass) {
             this.resetOtp();
             return;
@@ -77,9 +81,9 @@ const FieldViewOtp = FieldViewText.extend({
                 this.otpTickInterval = setInterval(this.otpTick.bind(this), 300);
             }
         }
-    },
+    }
 
-    otpTick: function() {
+    otpTick() {
         if (!this.value || !this.otpValidUntil) {
             return;
         }
@@ -98,6 +102,6 @@ const FieldViewOtp = FieldViewText.extend({
         this.fieldOpacity = opacity;
         this.valueEl.css('opacity', opacity);
     }
-});
+}
 
-module.exports = FieldViewOtp;
+export { FieldViewOtp };

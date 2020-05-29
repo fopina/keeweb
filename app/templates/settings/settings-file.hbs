@@ -1,4 +1,4 @@
-<div>
+<div class="settings__content">
     <h1><i class="fa fa-lock"></i> {{name}}</h1>
     {{#if storage}}
         {{#ifeq storage 'file'}}<p>{{res 'setFilePath'}}: {{path}}</p>{{/ifeq}}
@@ -15,8 +15,10 @@
             {{#ifeq storage 'file'}}{{res 'setFileSave'}}{{/ifeq}}
             {{#ifneq storage 'file'}}{{res 'setFileSyncVerb'}}{{/ifneq}}
         </button>
-        <button class="settings__file-button-save-choose btn-silent"
-            {{#if syncing}}disabled{{/if}}>{{res 'setFileSaveTo'}}</button>
+        {{#if canSaveTo}}
+            <button class="settings__file-button-save-choose btn-silent"
+                {{#if syncing}}disabled{{/if}}>{{res 'setFileSaveTo'}}</button>
+        {{/if}}
         <button class="settings__file-button-close btn-silent">{{res 'setFileClose'}}</button>
     </div>
 
@@ -31,14 +33,21 @@
             {{#unless prv.own}}
             <div class="settings__file-save-to settings__file-save-to-storage svg-btn" data-storage="{{prv.name}}">
                 {{#if prv.icon}}<i class="fa fa-{{prv.icon}}"></i>{{/if}}
-                {{#if prv.iconSvg}}{{{prv.iconSvg}}}{{/if}}
+                {{#if prv.iconSvg}}{{{svg prv.iconSvg}}}{{/if}}
                 <span>{{res prv.name}}</span>
             </div>
             {{/unless}}
         {{/each}}
+        {{#if canExportXml}}
         <div class="settings__file-save-to settings__file-save-to-xml">
             <i class="fa fa-code"></i>{{res 'setFileSaveToXml'}}
         </div>
+        {{/if}}
+        {{#if canExportHtml}}
+            <div class="settings__file-save-to settings__file-save-to-html">
+                <i class="fa fa-html5"></i>{{res 'setFileSaveToHtml'}}
+            </div>
+        {{/if}}
     </div>
 
     {{#if storage}}
@@ -55,8 +64,8 @@
     </label>
     <div class="hide">
         {{!-- we need these inputs to screw browsers passwords autocompletion --}}
-        <input type="text" style="display:none" name="username">
-        <input type="password" style="display:none" name="password">
+        <input type="text" name="username">
+        <input type="password" name="password">
     </div>
     <input type="password" class="settings__input input-base" id="settings__file-master-pass" value="{{password}}" autocomplete="new-password" />
     <div id="settings__file-confirm-master-pass-group">
@@ -113,34 +122,60 @@
         <input type="checkbox" class="settings__input input-base" id="settings__file-trash" {{#if recycleBinEnabled}}checked{{/if}} />
         <label for="settings__file-trash">{{res 'setFileEnableTrash'}}</label>
     </div>
-    <label for="settings__file-hist-len">{{res 'setFileHistLen'}}:</label>
-    <input type="text" pattern="\d+" required class="settings__input input-base" id="settings__file-hist-len" value="{{historyMaxItems}}" maxlength="6" />
+    <label for="settings__file-hist-type">{{res 'setFileHistMode'}}</label>
+    <select class="settings__select input-base" id="settings__file-hist-type">
+        <option value="1" {{#cmp historyMaxItems 0 '>'}}selected{{/cmp}}>{{res 'setFileHistLimited'}}</option>
+        <option value="0" {{#ifeq historyMaxItems 0}}selected{{/ifeq}}>{{res 'setFileHistDisabled'}}</option>
+        <option value="-1" {{#ifeq historyMaxItems -1}}selected{{/ifeq}}>{{res 'setFileHistUnlimited'}}</option>
+    </select>
+    {{#cmp historyMaxItems 0 '>'}}
+        <label for="settings__file-hist-len">{{res 'setFileHistLen'}}:</label>
+        <input type="text" pattern="\d+" required class="settings__input input-base" id="settings__file-hist-len" value="{{historyMaxItems}}" maxlength="6" />
+    {{/cmp}}
     <label for="settings__file-hist-size">{{res 'setFileHistSize'}}:</label>
     <input type="text" pattern="\d+" required class="settings__input input-base" id="settings__file-hist-size" value="{{historyMaxSize}}" maxlength="3" />
 
     <h2>{{res 'advanced'}}</h2>
+    <label for="settings__file-format-version">{{res 'setFileFormatVersion'}}</label>
+    <select class="settings__select input-base" id="settings__file-format-version">
+        <option value="3" {{#ifeq formatVersion 3}}selected{{/ifeq}}>KDBX 3</option>
+        <option value="4" {{#ifeq formatVersion 4}}selected{{/ifeq}}>KDBX 4</option>
+    </select>
+    <label for="settings__file-kdf">{{res 'setFileKdfParams'}}</label>
+    <select class="settings__select input-base" id="settings__file-kdf" {{#ifneq formatVersion 4}}disabled{{/ifneq}}>
+        <option value="Aes" {{#ifeq kdfName 'AES'}}selected{{/ifeq}}>AES</option>
+        {{#ifeq formatVersion 4}}<option value="Argon2" {{#ifeq kdfName 'Argon2'}}selected{{/ifeq}}>Argon2</option>{{/ifeq}}
+    </select>
     {{#if keyEncryptionRounds}}
     <label for="settings__file-key-rounds">{{res 'setFileRounds'}}:</label>
     <input type="text" pattern="\d+" required class="settings__input input-base" id="settings__file-key-rounds" value="{{keyEncryptionRounds}}" maxlength="10" />
     {{else if kdfParameters}}
-    <label>{{res 'setFileKdfParams'}}: Argon2</label>
-    <div class="settings__row">
-        <div class="settings__col-small">
-            <label class="settings__col-small-label" for="settings__file-kdf-iter">{{res 'setFileKdfParamsIter'}}:</label>
-            <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
-                   data-field="iterations" id="settings__file-kdf-iter" value="{{kdfParameters.iterations}}" maxlength="10" />
-        </div>
-        <div class="settings__col-small">
-            <label class="settings__col-small-label" for="settings__file-kdf-mem">{{res 'setFileKdfParamsMem'}}:</label>
-            <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
-                   data-field="memory" data-mul="1024" id="settings__file-kdf-mem" value="{{kdfParameters.memory}}" maxlength="10" />
-        </div>
-        <div class="settings__col-small">
-            <label class="settings__col-small-label" for="settings__file-kdf-par">{{res 'setFileKdfParamsPar'}}:</label>
-            <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
-                   data-field="parallelism" id="settings__file-kdf-par" value="{{kdfParameters.parallelism}}" maxlength="2" />
-        </div>
-    </div>
+        {{#ifeq kdfName 'Aes'}}
+            <div>
+                <label for="settings__file-kdf-rounds">{{res 'setFileRounds'}}:</label>
+                <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
+                       id="settings__file-kdf-rounds" data-field="rounds" value="{{kdfParameters.rounds}}" maxlength="10" />
+            </div>
+        {{/ifeq}}
+        {{#ifeq kdfName 'Argon2'}}
+            <div class="settings__row">
+                <div class="settings__col-small">
+                    <label class="settings__col-small-label" for="settings__file-kdf-iter">{{res 'setFileKdfParamsIter'}}:</label>
+                    <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
+                           data-field="iterations" id="settings__file-kdf-iter" value="{{kdfParameters.iterations}}" maxlength="10" />
+                </div>
+                <div class="settings__col-small">
+                    <label class="settings__col-small-label" for="settings__file-kdf-mem">{{res 'setFileKdfParamsMem'}}:</label>
+                    <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
+                           data-field="memory" data-mul="1024" id="settings__file-kdf-mem" value="{{kdfParameters.memory}}" maxlength="10" />
+                </div>
+                <div class="settings__col-small">
+                    <label class="settings__col-small-label" for="settings__file-kdf-par">{{res 'setFileKdfParamsPar'}}:</label>
+                    <input type="text" pattern="\d+" required class="settings__input input-base settings__input-kdf"
+                           data-field="parallelism" id="settings__file-kdf-par" value="{{kdfParameters.parallelism}}" maxlength="2" />
+                </div>
+            </div>
+        {{/ifeq}}
     {{/if}}
 
     <label for="settings__file-key-change-force">{{res 'setFileKeyChangeForce'}}:</label>

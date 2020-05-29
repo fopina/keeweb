@@ -1,31 +1,55 @@
-const Backbone = require('backbone');
-const FieldView = require('./field-view');
-const GeneratorView = require('../generator-view');
-const KeyHandler = require('../../comp/key-handler');
-const Keys = require('../../const/keys');
-const PasswordGenerator = require('../../util/password-generator');
-const FeatureDetector = require('../../util/feature-detector');
-const kdbxweb = require('kdbxweb');
-const Tip = require('../../util/tip');
+import kdbxweb from 'kdbxweb';
+import { Events } from 'framework/events';
+import { KeyHandler } from 'comp/browser/key-handler';
+import { Keys } from 'const/keys';
+import { Features } from 'util/features';
+import { MdToHtml } from 'util/formatting/md-to-html';
+import { PasswordPresenter } from 'util/formatting/password-presenter';
+import { Tip } from 'util/ui/tip';
+import { FieldView } from 'views/fields/field-view';
+import { GeneratorView } from 'views/generator-view';
+import { escape } from 'util/fn';
+import { AppSettingsModel } from 'models/app-settings-model';
 
-const FieldViewText = FieldView.extend({
-    renderValue: function(value) {
-        return value && value.isProtected ? PasswordGenerator.present(value.textLength)
-            : _.escape(value || '').replace(/\n/g, '<br/>');
-    },
+class FieldViewText extends FieldView {
+    hasOptions = true;
 
-    getEditValue: function(value) {
+    constructor(model, options) {
+        super(model, options);
+        this.once('remove', () => this.stopBlurListener());
+    }
+
+    renderValue(value) {
+        if (this.model.markdown && AppSettingsModel.useMarkdown) {
+            if (value && value.isProtected) {
+                value = value.getText();
+            }
+            const converted = MdToHtml.convert(value);
+            if (converted.html) {
+                return converted.html;
+            }
+            value = converted.text;
+        }
+        return value && value.isProtected
+            ? PasswordPresenter.presentValueWithLineBreaks(value)
+            : escape(value || '').replace(/\n/g, '<br/>');
+    }
+
+    getEditValue(value) {
         return value && value.isProtected ? value.getText() : value || '';
-    },
+    }
 
-    startEdit: function() {
+    startEdit() {
         const text = this.getEditValue(this.value);
         const isProtected = !!(this.value && this.value.isProtected);
         this.$el.toggleClass('details__field--protected', isProtected);
         this.input = $(document.createElement(this.model.multiline ? 'textarea' : 'input'));
         this.valueEl.html('').append(this.input);
-        this.input.attr({ autocomplete: 'off', spellcheck: 'false' })
-            .val(text).focus()[0].setSelectionRange(text.length, text.length);
+        this.input
+            .attr({ autocomplete: 'off', spellcheck: 'false' })
+            .val(text)
+            .focus()[0]
+            .setSelectionRange(text.length, text.length);
         this.input.bind({
             input: this.fieldValueInput.bind(this),
             keydown: this.fieldValueKeydown.bind(this),
@@ -33,24 +57,30 @@ const FieldViewText = FieldView.extend({
             click: this.fieldValueInputClick.bind(this),
             mousedown: this.fieldValueInputMouseDown.bind(this)
         });
-        this.listenTo(Backbone, 'click', this.fieldValueBlur);
-        this.listenTo(Backbone, 'main-window-will-close user-idle', this.externalEndEdit);
+        const fieldValueBlurBound = e => this.fieldValueBlur(e);
+        Events.on('click', fieldValueBlurBound);
+        this.stopBlurListener = () => Events.off('click', fieldValueBlurBound);
+        this.listenTo(Events, 'main-window-will-close', this.externalEndEdit);
+        this.listenTo(Events, 'user-idle', this.externalEndEdit);
         if (this.model.multiline) {
             this.setInputHeight();
         }
-        if (FeatureDetector.isMobile) {
+        if (Features.isMobile) {
             this.createMobileControls();
-        }
-        if (this.model.canGen) {
-            $('<div/>').addClass('details__field-value-btn details__field-value-btn-gen').appendTo(this.valueEl)
-                .click(this.showGeneratorClick.bind(this))
-                .mousedown(this.showGenerator.bind(this));
+        } else {
+            if (this.model.canGen) {
+                $('<div/>')
+                    .addClass('details__field-value-btn details__field-value-btn-gen')
+                    .appendTo(this.valueEl)
+                    .click(this.showGeneratorClick.bind(this))
+                    .mousedown(this.showGenerator.bind(this));
+            }
         }
         Tip.hideTip(this.valueEl[0]);
         Tip.hideTip(this.labelEl[0]);
-    },
+    }
 
-    createMobileControls: function() {
+    createMobileControls() {
         this.mobileControls = {};
         ['cancel', 'apply'].forEach(action => {
             this.mobileControls[action] = $('<div/>')
@@ -64,84 +94,95 @@ const FieldViewText = FieldView.extend({
                     touchmove: this.mobileFieldControlTouchMove.bind(this)
                 });
         });
-    },
+    }
 
-    showGeneratorClick: function(e) {
+    showGeneratorClick(e) {
         e.stopPropagation();
         if (!this.gen) {
             this.input.focus();
         }
-    },
+    }
 
-    showGenerator: function() {
+    showGenerator() {
         if (this.gen) {
             this.hideGenerator();
         } else {
             const fieldRect = this.input[0].getBoundingClientRect();
-            this.gen = new GeneratorView({model: {pos: {left: fieldRect.left, top: fieldRect.bottom}, password: this.value}}).render();
+            const shadowSpread = parseInt(this.input.css('--focus-shadow-spread')) || 0;
+            const pos = { left: fieldRect.left };
+            const top = fieldRect.bottom + shadowSpread;
+            const windowHeight = document.documentElement.clientHeight;
+            if (top > windowHeight / 2 && top > 200) {
+                pos.bottom = windowHeight - fieldRect.top + shadowSpread;
+            } else {
+                pos.top = top;
+            }
+            this.gen = new GeneratorView({
+                pos,
+                password: this.value
+            });
+            this.gen.render();
             this.gen.once('remove', this.generatorClosed.bind(this));
             this.gen.once('result', this.generatorResult.bind(this));
         }
-    },
+    }
 
-    hideGenerator: function() {
+    hideGenerator() {
         if (this.gen) {
             const gen = this.gen;
             delete this.gen;
             gen.remove();
         }
-    },
+    }
 
-    generatorClosed: function() {
+    generatorClosed() {
         if (this.gen) {
             delete this.gen;
             this.endEdit();
         }
-    },
+    }
 
-    generatorResult: function(password) {
+    generatorResult(password) {
         if (this.gen) {
             delete this.gen;
             this.endEdit(password);
         }
-    },
+    }
 
-    setInputHeight: function() {
+    setInputHeight() {
         const MinHeight = 18;
         this.input.height(MinHeight);
         let newHeight = this.input[0].scrollHeight;
         if (newHeight <= MinHeight) {
             newHeight = MinHeight;
-        } else {
-            newHeight += 2;
         }
         this.input.height(newHeight);
-    },
+    }
 
-    fieldValueBlur: function() {
+    fieldValueBlur() {
         if (!this.gen && this.input) {
             this.endEdit(this.input.val());
         }
-    },
+    }
 
-    fieldValueInput: function(e) {
+    fieldValueInput(e) {
         e.stopPropagation();
         if (this.model.multiline) {
             this.setInputHeight();
         }
-    },
+    }
 
-    fieldValueInputClick: function() {
+    fieldValueInputClick() {
         if (this.gen) {
             this.hideGenerator();
         }
-    },
+    }
 
-    fieldValueInputMouseDown: function(e) {
+    fieldValueInputMouseDown(e) {
         e.stopPropagation();
-    },
+    }
 
-    fieldValueKeydown: function(e) {
+    fieldValueKeydown(e) {
         KeyHandler.reg();
         const code = e.keyCode || e.which;
         if (code === Keys.DOM_VK_RETURN) {
@@ -170,15 +211,15 @@ const FieldViewText = FieldView.extend({
             return;
         }
         e.stopPropagation();
-    },
+    }
 
-    externalEndEdit: function() {
+    externalEndEdit() {
         if (this.input) {
             this.endEdit(this.input.val());
         }
-    },
+    }
 
-    endEdit: function(newVal, extra) {
+    endEdit(newVal, extra) {
         if (this.gen) {
             this.hideGenerator();
         }
@@ -198,12 +239,10 @@ const FieldViewText = FieldView.extend({
         if (typeof newVal === 'string') {
             newVal = $.trim(newVal);
         }
-        FieldView.prototype.endEdit.call(this, newVal, extra);
-    },
+        super.endEdit(newVal, extra);
+    }
 
-    stopBlurListener: function() {
-        this.stopListening(Backbone, 'click main-window-will-close', this.fieldValueBlur);
-    },
+    stopBlurListener() {}
 
     mobileFieldControlMouseDown(e) {
         e.stopPropagation();
@@ -214,11 +253,11 @@ const FieldViewText = FieldView.extend({
         } else {
             this.endEdit();
         }
-    },
+    }
 
     mobileFieldControlTouchStart(e) {
         this.$el.attr('active-mobile-action', $(e.target).data('action'));
-    },
+    }
 
     mobileFieldControlTouchEnd(e) {
         const shouldExecute = this.$el.attr('active-mobile-action') === $(e.target).data('action');
@@ -226,23 +265,22 @@ const FieldViewText = FieldView.extend({
         if (shouldExecute) {
             this.mobileFieldControlMouseDown(e);
         }
-    },
+    }
 
     mobileFieldControlTouchMove(e) {
         const touch = e.originalEvent.targetTouches[0];
         const rect = touch.target.getBoundingClientRect();
-        const inside = touch.clientX >= rect.left && touch.clientX <= rect.right &&
-            touch.clientY >= rect.top && touch.clientY <= rect.bottom;
+        const inside =
+            touch.clientX >= rect.left &&
+            touch.clientX <= rect.right &&
+            touch.clientY >= rect.top &&
+            touch.clientY <= rect.bottom;
         if (inside) {
             this.$el.attr('active-mobile-action', $(e.target).data('action'));
         } else {
             this.$el.removeAttr('active-mobile-action');
         }
-    },
-
-    render() {
-        FieldView.prototype.render.call(this);
     }
-});
+}
 
-module.exports = FieldViewText;
+export { FieldViewText };

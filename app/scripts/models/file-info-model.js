@@ -1,30 +1,36 @@
-const Backbone = require('backbone');
+import { Model } from 'framework/model';
+import { pick } from 'util/fn';
 
-const FileInfoModel = Backbone.Model.extend({
-    defaults: {
-        id: '',
-        name: '',
-        storage: null,
-        path: null,
-        modified: false,
-        editState: null,
-        rev: null,
-        syncDate: null,
-        openDate: null,
-        keyFileName: null,
-        keyFileHash: null,
-        opts: null,
-        backup: null,
-        fingerprint: null
-    },
+const DefaultProperties = {
+    id: '',
+    name: '',
+    storage: null,
+    path: null,
+    modified: false,
+    editState: null,
+    rev: null,
+    syncDate: null,
+    openDate: null,
+    keyFileName: null,
+    keyFileHash: null,
+    keyFilePath: null,
+    opts: null,
+    backup: null,
+    fingerprint: null
+};
 
-    initialize: function(data, options) {
-        _.each(data, function(val, key) {
+class FileInfoModel extends Model {
+    constructor(data) {
+        data = pick({ ...data }, Object.keys(DefaultProperties));
+        for (const [key, val] of Object.entries(data)) {
             if (/Date$/.test(key)) {
-                this.set(key, val ? new Date(val) : null, options);
+                data[key] = val ? new Date(val) : null;
             }
-        }, this);
+        }
+        super(data);
     }
-});
+}
 
-module.exports = FileInfoModel;
+FileInfoModel.defineModelProperties(DefaultProperties);
+
+export { FileInfoModel };

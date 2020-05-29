@@ -2,6 +2,9 @@ const electron = require('electron');
 const path = require('path');
 const fs = require('fs');
 
+let perfTimestamps = global.perfTimestamps;
+perfTimestamps.push({ name: 'loading app requires', ts: process.hrtime() });
+
 const app = electron.app;
 
 let mainWindow = null;
@@ -17,44 +20,53 @@ if (!gotTheLock) {
     app.quit();
 }
 
+perfTimestamps && perfTimestamps.push({ name: 'single instance lock', ts: process.hrtime() });
+
 let openFile = process.argv.filter(arg => /\.kdbx$/i.test(arg))[0];
-const userDataDir = app.getPath('userData').replace(/[\\/]temp[\\/]\d+\.\d+[\\/]?$/, '');
+const userDataDir =
+    process.env.KEEWEB_PORTABLE_EXECUTABLE_DIR ||
+    app.getPath('userData').replace(/[\\/]temp[\\/]\d+\.\d+[\\/]?$/, '');
 const windowPositionFileName = path.join(userDataDir, 'window-position.json');
 const appSettingsFileName = path.join(userDataDir, 'app-settings.json');
 const tempUserDataPath = path.join(userDataDir, 'temp');
 const tempUserDataPathRand = Date.now().toString() + Math.random().toString();
-const systemNotificationIds = [];
 
-let htmlPath = process.argv.filter(arg => arg.startsWith('--htmlpath=')).map(arg => arg.replace('--htmlpath=', ''))[0];
+let htmlPath = process.argv
+    .filter(arg => arg.startsWith('--htmlpath='))
+    .map(arg => arg.replace('--htmlpath=', ''))[0];
 if (!htmlPath) {
     htmlPath = 'file://' + path.join(__dirname, 'index.html');
 }
-const showDevToolsOnStart = process.argv.some(arg => arg.startsWith('--devtools'));
 
-app.setPath('userData', path.join(tempUserDataPath, tempUserDataPathRand));
+const showDevToolsOnStart =
+    process.argv.some(arg => arg.startsWith('--devtools')) ||
+    process.env.KEEWEB_OPEN_DEVTOOLS === '1';
+
+const startMinimized = process.argv.some(arg => arg.startsWith('--minimized'));
+
+const themeBgColors = {
+    db: '#342f2e',
+    fb: '#282c34',
+    wh: '#fafafa',
+    te: '#222',
+    hc: '#fafafa',
+    sd: '#002b36',
+    sl: '#fdf6e3',
+    macdark: '#1f1f20'
+};
+const defaultBgColor = '#282C34';
+
+perfTimestamps && perfTimestamps.push({ name: 'defining args', ts: process.hrtime() });
 
 setEnv();
 restorePreferences();
 
+const appSettings = readAppSettings() || {};
+
 app.on('window-all-closed', () => {
     if (restartPending) {
-        // unbind all handlers, load new app.js module and pass control to it
-        app.removeAllListeners('window-all-closed');
-        app.removeAllListeners('ready');
-        app.removeAllListeners('open-file');
-        app.removeAllListeners('activate');
-        app.removeAllListeners('second-instance');
-        electron.globalShortcut.unregisterAll();
-        electron.powerMonitor.removeAllListeners('suspend');
-        electron.powerMonitor.removeAllListeners('resume');
-        for (const id of systemNotificationIds) {
-            electron.systemPreferences.unsubscribeNotification(id);
-        }
-        systemNotificationIds.length = 0;
-        const userDataAppFile = path.join(userDataDir, 'app.asar/app.js');
-        delete require.cache[require.resolve('./app.js')];
-        require(userDataAppFile);
-        app.emit('ready');
+        app.relaunch();
+        app.exit(0);
     } else {
         if (process.platform !== 'darwin') {
             app.quit();
@@ -62,10 +74,12 @@ app.on('window-all-closed', () => {
     }
 });
 app.on('ready', () => {
+    perfTimestamps && perfTimestamps.push({ name: 'app on ready', ts: process.hrtime() });
     appReady = true;
     setAppOptions();
+    setSystemAppearance();
     createMainWindow();
-    setGlobalShortcuts();
+    setGlobalShortcuts(appSettings);
     subscribePowerEvents();
     deleteOldTempFiles();
     hookRequestHeaders();
@@ -90,17 +104,26 @@ app.on('second-instance', () => {
         restoreMainWindow();
     }
 });
-app.restartApp = function () {
+app.on('web-contents-created', (event, contents) => {
+    contents.on('new-window', async (e, url) => {
+        e.preventDefault();
+        emitRemoteEvent('log', { message: `Prevented new window: ${url}` });
+    });
+    contents.on('will-navigate', (e, url) => {
+        if (!url.startsWith('https://beta.keeweb.info/') && !url.startsWith(htmlPath)) {
+            e.preventDefault();
+            emitRemoteEvent('log', { message: `Prevented navigation: ${url}` });
+        }
+    });
+});
+app.restartApp = function() {
     restartPending = true;
     mainWindow.close();
     setTimeout(() => {
         restartPending = false;
     }, 1000);
 };
-app.openWindow = function (opts) {
-    return new electron.BrowserWindow(opts);
-};
-app.minimizeApp = function () {
+app.minimizeApp = function(menuItemLabels) {
     let imagePath;
     mainWindow.hide();
     if (process.platform === 'darwin') {
@@ -115,26 +138,27 @@ app.minimizeApp = function () {
         appIcon = new electron.Tray(image);
         appIcon.on('click', restoreMainWindow);
         const contextMenu = electron.Menu.buildFromTemplate([
-            {label: 'Open KeeWeb', click: restoreMainWindow},
-            {label: 'Quit KeeWeb', click: closeMainWindow}
+            { label: menuItemLabels.restore, click: restoreMainWindow },
+            { label: menuItemLabels.quit, click: closeMainWindow }
         ]);
         appIcon.setContextMenu(contextMenu);
         appIcon.setToolTip('KeeWeb');
     }
 };
-app.minimizeThenHideIfInTray = function () {
+app.minimizeThenHideIfInTray = function() {
     // This function is called when auto-type has displayed a selection list and a selection was made.
     // To ensure focus returns to the previous window we must minimize first even if we're going to hide.
     mainWindow.minimize();
     if (appIcon) mainWindow.hide();
 };
-app.getMainWindow = function () {
+app.getMainWindow = function() {
     return mainWindow;
 };
-app.emitBackboneEvent = emitBackboneEvent;
+app.setGlobalShortcuts = setGlobalShortcuts;
 
 function setAppOptions() {
     app.commandLine.appendSwitch('disable-background-timer-throttling');
+    perfTimestamps && perfTimestamps.push({ name: 'setting app options', ts: process.hrtime() });
 }
 
 function readAppSettings() {
@@ -142,33 +166,61 @@ function readAppSettings() {
         return JSON.parse(fs.readFileSync(appSettingsFileName, 'utf8'));
     } catch (e) {
         return null;
+    } finally {
+        perfTimestamps &&
+            perfTimestamps.push({ name: 'reading app settings', ts: process.hrtime() });
     }
 }
 
+function setSystemAppearance() {
+    if (process.platform === 'darwin') {
+        if (electron.nativeTheme.shouldUseDarkColors) {
+            electron.systemPreferences.appLevelAppearance = 'dark';
+        }
+    }
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'setting system appearance', ts: process.hrtime() });
+}
+
 function createMainWindow() {
-    const appSettings = readAppSettings();
     const windowOptions = {
         show: false,
-        width: 1000, height: 700, minWidth: 700, minHeight: 400,
-        titleBarStyle: appSettings ? appSettings.titlebarStyle : undefined,
-        backgroundColor: '#282C34',
+        width: 1000,
+        height: 700,
+        minWidth: 700,
+        minHeight: 400,
+        titleBarStyle: appSettings.titlebarStyle,
+        backgroundColor: themeBgColors[appSettings.theme] || defaultBgColor,
         webPreferences: {
-            backgroundThrottling: false
+            backgroundThrottling: false,
+            nodeIntegration: true,
+            nodeIntegrationInWorker: true
         }
     };
     if (process.platform !== 'win32') {
         windowOptions.icon = path.join(__dirname, 'icon.png');
     }
     mainWindow = new electron.BrowserWindow(windowOptions);
+    perfTimestamps && perfTimestamps.push({ name: 'creating main window', ts: process.hrtime() });
+
     setMenu();
+    perfTimestamps && perfTimestamps.push({ name: 'setting menu', ts: process.hrtime() });
+
     mainWindow.loadURL(htmlPath);
     if (showDevToolsOnStart) {
         mainWindow.openDevTools({ mode: 'bottom' });
     }
     mainWindow.once('ready-to-show', () => {
-        mainWindow.show();
+        perfTimestamps && perfTimestamps.push({ name: 'main window ready', ts: process.hrtime() });
+        if (startMinimized) {
+            emitRemoteEvent('launcher-started-minimized');
+        } else {
+            mainWindow.show();
+        }
         ready = true;
         notifyOpenFile();
+        perfTimestamps && perfTimestamps.push({ name: 'main window shown', ts: process.hrtime() });
+        reportStartProfile();
     });
     mainWindow.webContents.on('context-menu', onContextMenu);
     mainWindow.on('resize', delaySaveMainWindowPosition);
@@ -182,18 +234,23 @@ function createMainWindow() {
         saveMainWindowPosition();
     });
     mainWindow.on('minimize', () => {
-        emitBackboneEvent('launcher-minimize');
+        emitRemoteEvent('launcher-minimize');
     });
     mainWindow.on('leave-full-screen', () => {
-        emitBackboneEvent('leave-full-screen');
+        emitRemoteEvent('leave-full-screen');
     });
     mainWindow.on('enter-full-screen', () => {
-        emitBackboneEvent('enter-full-screen');
+        emitRemoteEvent('enter-full-screen');
     });
     mainWindow.on('session-end', () => {
-        emitBackboneEvent('os-lock');
+        emitRemoteEvent('os-lock');
     });
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'configuring main window', ts: process.hrtime() });
+
     restoreMainWindowPosition();
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'restoring main window position', ts: process.hrtime() });
 }
 
 function restoreMainWindow() {
@@ -211,7 +268,7 @@ function restoreMainWindow() {
 }
 
 function closeMainWindow() {
-    emitBackboneEvent('launcher-exit-request');
+    emitRemoteEvent('launcher-exit-request');
     setTimeout(destroyAppIcon, 0);
 }
 
@@ -272,31 +329,37 @@ function restoreMainWindowPosition() {
                     mainWindow.setBounds(mainWindowPosition);
                     coerceMainWindowPositionToConnectedDisplay();
                 }
-                if (mainWindowPosition.maximized) { mainWindow.maximize(); }
-                if (mainWindowPosition.fullScreen) { mainWindow.setFullScreen(true); }
+                if (mainWindowPosition.maximized) {
+                    mainWindow.maximize();
+                }
+                if (mainWindowPosition.fullScreen) {
+                    mainWindow.setFullScreen(true);
+                }
             }
         }
     });
 }
 
 function mainWindowBlur() {
-    emitBackboneEvent('main-window-blur');
+    emitRemoteEvent('main-window-blur');
 }
 
 function mainWindowFocus() {
-    emitBackboneEvent('main-window-focus');
+    emitRemoteEvent('main-window-focus');
 }
 
-function emitBackboneEvent(e, arg) {
+function emitRemoteEvent(e, arg) {
     if (mainWindow && mainWindow.webContents) {
-        arg = JSON.stringify(arg);
-        mainWindow.webContents.executeJavaScript(`Backbone.trigger('${e}', ${arg}); void 0;`);
+        app.emit('remote-app-event', {
+            name: e,
+            data: arg
+        });
     }
 }
 
 function setMenu() {
     if (process.platform === 'darwin') {
-        const name = require('electron').app.getName();
+        const name = require('electron').app.name;
         const template = [
             {
                 label: name,
@@ -334,6 +397,10 @@ function setMenu() {
         ];
         const menu = electron.Menu.buildFromTemplate(template);
         electron.Menu.setApplicationMenu(menu);
+    } else {
+        mainWindow.setMenuBarVisibility(false);
+        mainWindow.setMenu(null);
+        electron.Menu.setApplicationMenu(null);
     }
 }
 
@@ -343,67 +410,91 @@ function onContextMenu(e, props) {
     }
     const Menu = electron.Menu;
     const inputMenu = Menu.buildFromTemplate([
-        {role: 'undo'},
-        {role: 'redo'},
-        {type: 'separator'},
-        {role: 'cut'},
-        {role: 'copy'},
-        {role: 'paste'},
-        {type: 'separator'},
-        {role: 'selectall'}
+        { role: 'undo' },
+        { role: 'redo' },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { type: 'separator' },
+        { role: 'selectall' }
     ]);
     inputMenu.popup(mainWindow);
 }
 
 function notifyOpenFile() {
     if (ready && openFile && mainWindow) {
-        const openKeyfile = process.argv.filter(arg => arg.startsWith('--keyfile=')).map(arg => arg.replace('--keyfile=', ''))[0];
+        const openKeyfile = process.argv
+            .filter(arg => arg.startsWith('--keyfile='))
+            .map(arg => arg.replace('--keyfile=', ''))[0];
         const fileInfo = JSON.stringify({ data: openFile, key: openKeyfile });
-        mainWindow.webContents.executeJavaScript('if (window.launcherOpen) { window.launcherOpen(' + fileInfo + '); } ' +
-            ' else { window.launcherOpenedFile=' + fileInfo + '; }');
+        mainWindow.webContents.executeJavaScript(
+            'if (window.launcherOpen) { window.launcherOpen(' +
+                fileInfo +
+                '); } ' +
+                ' else { window.launcherOpenedFile=' +
+                fileInfo +
+                '; }'
+        );
         openFile = null;
     }
 }
 
-function setGlobalShortcuts() {
-    const shortcutModifiers = process.platform === 'darwin' ? 'Ctrl+Alt+' : 'Shift+Alt+';
-    const shortcuts = {
-        C: 'copy-password',
-        B: 'copy-user',
-        U: 'copy-url',
-        T: 'auto-type'
+function setGlobalShortcuts(appSettings) {
+    const defaultShortcutModifiers = process.platform === 'darwin' ? 'Ctrl+Alt+' : 'Shift+Alt+';
+    const defaultShortcuts = {
+        AutoType: { shortcut: defaultShortcutModifiers + 'T', event: 'auto-type' },
+        CopyPassword: { shortcut: defaultShortcutModifiers + 'C', event: 'copy-password' },
+        CopyUser: { shortcut: defaultShortcutModifiers + 'B', event: 'copy-user' },
+        CopyUrl: { shortcut: defaultShortcutModifiers + 'U', event: 'copy-url' },
+        CopyOtp: { event: 'copy-otp' },
+        RestoreApp: { action: restoreMainWindow }
     };
-    Object.keys(shortcuts).forEach(key => {
-        const shortcut = shortcutModifiers + key;
-        const eventName = shortcuts[key];
-        try {
-            electron.globalShortcut.register(shortcut, () => {
-                emitBackboneEvent(eventName);
-            });
-        } catch (e) {}
-    });
+    electron.globalShortcut.unregisterAll();
+    for (const [key, shortcutDef] of Object.entries(defaultShortcuts)) {
+        const fromSettings = appSettings[`globalShortcut${key}`];
+        const shortcut = fromSettings || shortcutDef.shortcut;
+        if (shortcut) {
+            try {
+                electron.globalShortcut.register(shortcut, () => {
+                    if (shortcutDef.event) {
+                        emitRemoteEvent(shortcutDef.event);
+                    }
+                    if (shortcutDef.action) {
+                        shortcutDef.action();
+                    }
+                });
+            } catch (e) {}
+        }
+    }
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'setting global shortcuts', ts: process.hrtime() });
 }
 
 function subscribePowerEvents() {
     electron.powerMonitor.on('suspend', () => {
-        emitBackboneEvent('power-monitor-suspend');
+        emitRemoteEvent('power-monitor-suspend');
     });
     electron.powerMonitor.on('resume', () => {
-        emitBackboneEvent('power-monitor-resume');
+        emitRemoteEvent('power-monitor-resume');
     });
-    if (process.platform === 'darwin') {
-        const id = electron.systemPreferences.subscribeNotification('com.apple.screenIsLocked', () => {
-            emitBackboneEvent('os-lock');
-        });
-        systemNotificationIds.push(id);
-    }
+    electron.powerMonitor.on('lock-screen', () => {
+        emitRemoteEvent('os-lock');
+    });
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'subscribing to power events', ts: process.hrtime() });
 }
 
 function setEnv() {
-    if (process.platform === 'linux' && ['Pantheon', 'Unity:Unity7'].indexOf(process.env.XDG_CURRENT_DESKTOP) !== -1) {
+    app.setPath('userData', path.join(tempUserDataPath, tempUserDataPathRand));
+    if (
+        process.platform === 'linux' &&
+        ['Pantheon', 'Unity:Unity7'].indexOf(process.env.XDG_CURRENT_DESKTOP) !== -1
+    ) {
         // https://github.com/electron/electron/issues/9046
         process.env.XDG_CURRENT_DESKTOP = 'Unity';
     }
+    perfTimestamps && perfTimestamps.push({ name: 'setting env', ts: process.hrtime() });
 }
 
 function restorePreferences() {
@@ -413,7 +504,7 @@ function restorePreferences() {
     let oldProfile;
     try {
         oldProfile = JSON.parse(fs.readFileSync(profileConfigPath, 'utf8'));
-    } catch (e) { }
+    } catch (e) {}
 
     fs.writeFileSync(profileConfigPath, JSON.stringify(newProfile));
 
@@ -421,11 +512,22 @@ function restorePreferences() {
         const oldProfilePath = path.join(tempUserDataPath, oldProfile.dir);
         const newProfilePath = path.join(tempUserDataPath, newProfile.dir);
         if (fs.existsSync(path.join(oldProfilePath, 'Cookies'))) {
-            fs.mkdirSync(newProfilePath);
-            fs.renameSync(path.join(oldProfilePath, 'Cookies'),
-                path.join(newProfilePath, 'Cookies'));
+            if (!fs.existsSync(newProfilePath)) {
+                fs.mkdirSync(newProfilePath);
+            }
+            const cookiesFileSrc = path.join(oldProfilePath, 'Cookies');
+            const cookiesFileDest = path.join(newProfilePath, 'Cookies');
+            try {
+                fs.renameSync(cookiesFileSrc, cookiesFileDest);
+            } catch (e) {
+                try {
+                    fs.copyFileSync(cookiesFileSrc, cookiesFileDest);
+                } catch (e) {}
+            }
         }
     }
+
+    perfTimestamps && perfTimestamps.push({ name: 'restoring preferences', ts: process.hrtime() });
 }
 
 function deleteOldTempFiles() {
@@ -442,6 +544,8 @@ function deleteOldTempFiles() {
         }
         app.oldTempFilesDeleted = true; // this is added to prevent file deletion on restart
     }, 1000);
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'deleting old temp files', ts: process.hrtime() });
 }
 
 function deleteRecursive(dir) {
@@ -463,10 +567,12 @@ function deleteRecursive(dir) {
 function hookRequestHeaders() {
     electron.session.defaultSession.webRequest.onBeforeSendHeaders((details, callback) => {
         if (!details.url.startsWith('ws:')) {
-            delete details.requestHeaders['Origin'];
+            delete details.requestHeaders.Origin;
         }
-        callback({cancel: false, requestHeaders: details.requestHeaders});
+        callback({ requestHeaders: details.requestHeaders });
     });
+    perfTimestamps &&
+        perfTimestamps.push({ name: 'setting request handlers', ts: process.hrtime() });
 }
 
 // If a display is disconnected while KeeWeb is minimized, Electron does not
@@ -488,8 +594,10 @@ function coerceMainWindowPositionToConnectedDisplay() {
     // 160px width and 2/3s the title bar height should be enough that the user can grab it
     for (let i = 0; i < displays.length; ++i) {
         const workArea = displays[i].workArea;
-        const overlapWidth = Math.min(tbRight, workArea.x + workArea.width) - Math.max(tbLeft, workArea.x);
-        const overlapHeight = Math.min(tbBottom, workArea.y + workArea.height) - Math.max(tbTop, workArea.y);
+        const overlapWidth =
+            Math.min(tbRight, workArea.x + workArea.width) - Math.max(tbLeft, workArea.x);
+        const overlapHeight =
+            Math.min(tbBottom, workArea.y + workArea.height) - Math.max(tbTop, workArea.y);
         if (overlapWidth >= 160 && 3 * overlapHeight >= 2 * (tbBottom - tbTop)) return;
     }
     // If we get here, no display contains a big enough strip of the title bar
@@ -506,4 +614,32 @@ function coerceMainWindowPositionToConnectedDisplay() {
         'height': newHeight
     });
     updateMainWindowPosition();
+}
+
+function reportStartProfile() {
+    if (!perfTimestamps) {
+        return;
+    }
+
+    const processCreationTime = process.getCreationTime();
+    const totalTime = Math.round(Date.now() - processCreationTime);
+    let lastTs = 0;
+    const timings = perfTimestamps
+        .map(milestone => {
+            const ts = milestone.ts;
+            const elapsed = lastTs
+                ? Math.round((ts[0] - lastTs[0]) * 1e3 + (ts[1] - lastTs[1]) / 1e6)
+                : 0;
+            lastTs = ts;
+            return {
+                name: milestone.name,
+                elapsed
+            };
+        })
+        .slice(1);
+
+    perfTimestamps = global.perfTimestamps = undefined;
+
+    const startProfile = { totalTime, timings };
+    emitRemoteEvent('start-profile', startProfile);
 }

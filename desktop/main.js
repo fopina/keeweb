@@ -4,15 +4,21 @@
 // It checks whether the app is available in userData folder and if its version is higher than local, launches it
 // This script is the only part which will be updated only with the app itself, auto-update will not change it
 
-// (C) Antelle 2017, MIT license https://github.com/keeweb/keeweb
+// (C) Antelle 2019, MIT license https://github.com/keeweb/keeweb
+
+global.perfTimestamps = [{ name: 'pre-init', ts: process.hrtime() }];
 
 const app = require('electron').app;
 const path = require('path');
 const fs = require('original-fs');
 
+global.perfTimestamps.push({ name: 'loading main requires', ts: process.hrtime() });
+
 const userDataDir = app.getPath('userData');
 const userDataAppArchivePath = path.join(userDataDir, 'app.asar');
 let entryPointDir = __dirname;
+
+global.perfTimestamps.push({ name: 'getting data dir', ts: process.hrtime() });
 
 try {
     const appFilePath = entryPointDir.endsWith('app.asar') ? entryPointDir : __filename;
@@ -20,13 +26,23 @@ try {
     try {
         userPackageStat = fs.statSync(userDataAppArchivePath);
     } catch (e) {}
+    global.perfTimestamps.push({ name: 'checking for new version', ts: process.hrtime() });
+
     if (userPackageStat) {
         const packageStat = fs.statSync(appFilePath);
-        const userPackageStatTime = Math.max(userPackageStat.mtime.getTime(), userPackageStat.ctime.getTime());
+        const userPackageStatTime = Math.max(
+            userPackageStat.mtime.getTime(),
+            userPackageStat.ctime.getTime()
+        );
+        global.perfTimestamps.push({ name: 'getting asar file time', ts: process.hrtime() });
+
         const packageStatTime = Math.max(packageStat.mtime.getTime(), packageStat.ctime.getTime());
         if (userPackageStatTime > packageStatTime) {
             let versionLocal = require('./package.json').version;
-            let versionUserData = require(path.join(userDataAppArchivePath, 'package.json')).version;
+            let versionUserData = require(path.join(userDataAppArchivePath, 'package.json'))
+                .version;
+            global.perfTimestamps.push({ name: 'getting package version', ts: process.hrtime() });
+
             versionLocal = versionLocal.split('.');
             versionUserData = versionUserData.split('.');
             for (let i = 0; i < versionLocal.length; i++) {
@@ -34,6 +50,10 @@ try {
                     entryPointDir = userDataAppArchivePath;
                     try {
                         validateSignature(userDataDir);
+                        global.perfTimestamps.push({
+                            name: 'validating signature',
+                            ts: process.hrtime()
+                        });
                     } catch (e) {
                         exitWithError('Error validating signatures: ' + e);
                     }
@@ -72,7 +92,7 @@ function validateDataSignature(data, signature, name) {
     const verify = crypto.createVerify('RSA-SHA256');
     let publicKey = '@@PUBLIC_KEY_CONTENT';
     if (publicKey.startsWith('@@')) {
-        publicKey = fs.readFileSync('app/resources/public-key.pem', {encoding: 'utf8'}).trim();
+        publicKey = fs.readFileSync('app/resources/public-key.pem', { encoding: 'utf8' }).trim();
     }
     verify.write(data);
     verify.end();

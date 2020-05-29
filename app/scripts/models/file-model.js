@@ -1,50 +1,26 @@
-const Backbone = require('backbone');
-const GroupCollection = require('../collections/group-collection');
-const GroupModel = require('./group-model');
-const IconUrl = require('../util/icon-url');
-const Logger = require('../util/logger');
-const kdbxweb = require('kdbxweb');
-const demoFileData = require('base64-loader!../../resources/Demo.kdbx');
+import kdbxweb from 'kdbxweb';
+import demoFileData from 'demo.kdbx';
+import { Model } from 'framework/model';
+import { Events } from 'framework/events';
+import { GroupCollection } from 'collections/group-collection';
+import { KdbxToHtml } from 'comp/format/kdbx-to-html';
+import { GroupModel } from 'models/group-model';
+import { IconUrlFormat } from 'util/formatting/icon-url-format';
+import { Logger } from 'util/logger';
+import { mapObject } from 'util/fn';
 
 const logger = new Logger('file');
 
-const FileModel = Backbone.Model.extend({
-    defaults: {
-        id: '',
-        uuid: '',
-        name: '',
-        keyFileName: '',
-        passwordLength: 0,
-        path: '',
-        opts: null,
-        storage: null,
-        modified: false,
-        dirty: false,
-        open: false,
-        created: false,
-        demo: false,
-        groups: null,
-        oldPasswordLength: 0,
-        oldKeyFileName: '',
-        passwordChanged: false,
-        keyFileChanged: false,
-        keyChangeForce: -1,
-        syncing: false,
-        syncError: null,
-        syncDate: null,
-        backup: null
-    },
+class FileModel extends Model {
+    constructor(data) {
+        super({
+            entryMap: {},
+            groupMap: {},
+            ...data
+        });
+    }
 
-    db: null,
-    entryMap: null,
-    groupMap: null,
-
-    initialize: function() {
-        this.entryMap = {};
-        this.groupMap = {};
-    },
-
-    open: function(password, fileData, keyFileData, callback) {
+    open(password, fileData, keyFileData, callback) {
         try {
             const credentials = new kdbxweb.Credentials(password, keyFileData);
             const ts = logger.ts();
@@ -57,13 +33,29 @@ const FileModel = Backbone.Model.extend({
                     if (keyFileData) {
                         kdbxweb.ByteUtils.zeroBuffer(keyFileData);
                     }
-                    logger.info('Opened file ' + this.get('name') + ': ' + logger.ts(ts) + ', ' +
-                        this.kdfArgsToString(db.header) + ', ' + Math.round(fileData.byteLength / 1024) + ' kB');
+                    this.fixVersion();
+                    logger.info(
+                        'Opened file ' +
+                            this.name +
+                            ': ' +
+                            logger.ts(ts) +
+                            ', ' +
+                            this.kdfArgsToString(db.header) +
+                            ', ' +
+                            Math.round(fileData.byteLength / 1024) +
+                            ' kB'
+                    );
                     callback();
                 })
                 .catch(err => {
-                    if (err.code === kdbxweb.Consts.ErrorCodes.InvalidKey && password && !password.byteLength) {
-                        logger.info('Error opening file with empty password, try to open with null password');
+                    if (
+                        err.code === kdbxweb.Consts.ErrorCodes.InvalidKey &&
+                        password &&
+                        !password.byteLength
+                    ) {
+                        logger.info(
+                            'Error opening file with empty password, try to open with null password'
+                        );
                         return this.open(null, fileData, keyFileData, callback);
                     }
                     logger.error('Error opening file', err.code, err.message, err);
@@ -73,34 +65,38 @@ const FileModel = Backbone.Model.extend({
             logger.error('Error opening file', e, e.code, e.message, e);
             callback(e);
         }
-    },
+    }
 
-    kdfArgsToString: function(header) {
+    kdfArgsToString(header) {
         if (header.kdfParameters) {
-            return header.kdfParameters.keys().map(key => {
-                const val = header.kdfParameters.get(key);
-                if (val instanceof ArrayBuffer) {
-                    return;
-                }
-                return key + '=' + val;
-            }).filter(p => p).join('&');
+            return header.kdfParameters
+                .keys()
+                .map(key => {
+                    const val = header.kdfParameters.get(key);
+                    if (val instanceof ArrayBuffer) {
+                        return undefined;
+                    }
+                    return key + '=' + val;
+                })
+                .filter(p => p)
+                .join('&');
         } else if (header.keyEncryptionRounds) {
             return header.keyEncryptionRounds + ' rounds';
         } else {
             return '?';
         }
-    },
+    }
 
-    create: function(name) {
+    create(name) {
         const password = kdbxweb.ProtectedValue.fromString('');
         const credentials = new kdbxweb.Credentials(password);
         this.db = kdbxweb.Kdbx.create(credentials, name);
-        this.set('name', name);
+        this.name = name;
         this.readModel();
-        this.set({ open: true, created: true, name: name });
-    },
+        this.set({ active: true, created: true, name });
+    }
 
-    importWithXml: function(fileXml, callback) {
+    importWithXml(fileXml, callback) {
         try {
             const ts = logger.ts();
             const password = kdbxweb.ProtectedValue.fromString('');
@@ -109,8 +105,8 @@ const FileModel = Backbone.Model.extend({
                 .then(db => {
                     this.db = db;
                     this.readModel();
-                    this.set({ open: true, created: true });
-                    logger.info('Imported file ' + this.get('name') + ': ' + logger.ts(ts));
+                    this.set({ active: true, created: true });
+                    logger.info('Imported file ' + this.name + ': ' + logger.ts(ts));
                     callback();
                 })
                 .catch(err => {
@@ -121,49 +117,55 @@ const FileModel = Backbone.Model.extend({
             logger.error('Error importing file', e, e.code, e.message, e);
             callback(e);
         }
-    },
+    }
 
-    openDemo: function(callback) {
+    openDemo(callback) {
         const password = kdbxweb.ProtectedValue.fromString('demo');
         const credentials = new kdbxweb.Credentials(password);
-        const demoFile = kdbxweb.ByteUtils.arrayToBuffer(kdbxweb.ByteUtils.base64ToBytes(demoFileData));
-        kdbxweb.Kdbx.load(demoFile, credentials)
-            .then(db => {
-                this.db = db;
-                this.set('name', 'Demo');
-                this.readModel();
-                this.setOpenFile({passwordLength: 4, demo: true});
-                callback();
-            });
-    },
+        const demoFile = kdbxweb.ByteUtils.arrayToBuffer(
+            kdbxweb.ByteUtils.base64ToBytes(demoFileData)
+        );
+        kdbxweb.Kdbx.load(demoFile, credentials).then(db => {
+            this.db = db;
+            this.name = 'Demo';
+            this.readModel();
+            this.setOpenFile({ passwordLength: 4, demo: true });
+            callback();
+        });
+    }
 
-    setOpenFile: function(props) {
-        _.extend(props, {
-            open: true,
-            oldKeyFileName: this.get('keyFileName'),
+    setOpenFile(props) {
+        this.set({
+            ...props,
+            active: true,
+            oldKeyFileName: this.keyFileName,
             oldPasswordLength: props.passwordLength,
             passwordChanged: false,
             keyFileChanged: false
         });
-        this.set(props);
-        this._oldPasswordHash = this.db.credentials.passwordHash;
-        this._oldKeyFileHash = this.db.credentials.keyFileHash;
-        this._oldKeyChangeDate = this.db.meta.keyChanged;
-    },
+        this.oldPasswordHash = this.db.credentials.passwordHash;
+        this.oldKeyFileHash = this.db.credentials.keyFileHash;
+        this.oldKeyChangeDate = this.db.meta.keyChanged;
+    }
 
-    readModel: function() {
+    readModel() {
         const groups = new GroupCollection();
-        this.set({
-            uuid: this.db.getDefaultGroup().uuid.toString(),
-            groups: groups,
-            defaultUser: this.db.meta.defaultUser,
-            recycleBinEnabled: this.db.meta.recycleBinEnabled,
-            historyMaxItems: this.db.meta.historyMaxItems,
-            historyMaxSize: this.db.meta.historyMaxSize,
-            keyEncryptionRounds: this.db.header.keyEncryptionRounds,
-            keyChangeForce: this.db.meta.keyChangeForce,
-            kdfParameters: this.readKdfParams()
-        }, { silent: true });
+        this.set(
+            {
+                uuid: this.db.getDefaultGroup().uuid.toString(),
+                groups,
+                formatVersion: this.db.header.versionMajor,
+                defaultUser: this.db.meta.defaultUser,
+                recycleBinEnabled: this.db.meta.recycleBinEnabled,
+                historyMaxItems: this.db.meta.historyMaxItems,
+                historyMaxSize: this.db.meta.historyMaxSize,
+                keyEncryptionRounds: this.db.header.keyEncryptionRounds,
+                keyChangeForce: this.db.meta.keyChangeForce,
+                kdfName: this.readKdfName(),
+                kdfParameters: this.readKdfParams()
+            },
+            { silent: true }
+        );
         this.db.groups.forEach(function(group) {
             let groupModel = this.getGroup(this.subId(group.uuid.id));
             if (groupModel) {
@@ -171,13 +173,32 @@ const FileModel = Backbone.Model.extend({
             } else {
                 groupModel = GroupModel.fromGroup(group, this);
             }
-            groups.add(groupModel);
+            groups.push(groupModel);
         }, this);
         this.buildObjectMap();
         this.resolveFieldReferences();
-    },
+    }
 
-    readKdfParams: function() {
+    readKdfName() {
+        if (this.db.header.versionMajor === 4 && this.db.header.kdfParameters) {
+            const kdfParameters = this.db.header.kdfParameters;
+            let uuid = kdfParameters.get('$UUID');
+            if (uuid) {
+                uuid = kdbxweb.ByteUtils.bytesToBase64(uuid);
+                switch (uuid) {
+                    case kdbxweb.Consts.KdfId.Argon2:
+                        return 'Argon2';
+                    case kdbxweb.Consts.KdfId.Aes:
+                        return 'Aes';
+                }
+            }
+            return 'Unknown';
+        } else {
+            return 'Aes';
+        }
+    }
+
+    readKdfParams() {
         const kdfParameters = this.db.header.kdfParameters;
         if (!kdfParameters) {
             return undefined;
@@ -187,47 +208,67 @@ const FileModel = Backbone.Model.extend({
             return undefined;
         }
         uuid = kdbxweb.ByteUtils.bytesToBase64(uuid);
-        if (uuid !== kdbxweb.Consts.KdfId.Argon2) {
-            return undefined;
+        switch (uuid) {
+            case kdbxweb.Consts.KdfId.Argon2:
+                return {
+                    parallelism: kdfParameters.get('P').valueOf(),
+                    iterations: kdfParameters.get('I').valueOf(),
+                    memory: kdfParameters.get('M').valueOf()
+                };
+            case kdbxweb.Consts.KdfId.Aes:
+                return {
+                    rounds: kdfParameters.get('R').valueOf()
+                };
+            default:
+                return undefined;
         }
-        return {
-            parallelism: kdfParameters.get('P').valueOf(),
-            iterations: kdfParameters.get('I').valueOf(),
-            memory: kdfParameters.get('M').valueOf()
-        };
-    },
+    }
 
-    subId: function(id) {
+    subId(id) {
         return this.id + ':' + id;
-    },
+    }
 
-    buildObjectMap: function() {
+    buildObjectMap() {
         const entryMap = {};
         const groupMap = {};
-        this.forEachGroup(group => {
-            groupMap[group.id] = group;
-            group.forEachOwnEntry(null, entry => {
-                entryMap[entry.id] = entry;
-            });
-        }, { includeDisabled: true });
+        this.forEachGroup(
+            group => {
+                groupMap[group.id] = group;
+                group.forEachOwnEntry(null, entry => {
+                    entryMap[entry.id] = entry;
+                });
+            },
+            { includeDisabled: true }
+        );
         this.entryMap = entryMap;
         this.groupMap = groupMap;
-    },
+    }
 
-    resolveFieldReferences: function() {
+    resolveFieldReferences() {
         const entryMap = this.entryMap;
         Object.keys(entryMap).forEach(e => {
             entryMap[e].resolveFieldReferences();
         });
-    },
+    }
 
-    reload: function() {
+    fixVersion() {
+        if (
+            this.db.meta.generator === 'KdbxWeb' &&
+            this.db.header.versionMajor === 4 &&
+            this.db.header.versionMinor === 1
+        ) {
+            this.db.header.versionMinor = 0;
+            logger.info('Fixed file version: 4.1 => 4.0');
+        }
+    }
+
+    reload() {
         this.buildObjectMap();
         this.readModel();
-        this.trigger('reload', this);
-    },
+        this.emit('reload', this);
+    }
 
-    mergeOrUpdate: function(fileData, remoteKey, callback) {
+    mergeOrUpdate(fileData, remoteKey, callback) {
         let credentials;
         let credentialsPromise = Promise.resolve();
         if (remoteKey) {
@@ -254,13 +295,13 @@ const FileModel = Backbone.Model.extend({
         credentialsPromise.then(() => {
             kdbxweb.Kdbx.load(fileData, credentials)
                 .then(remoteDb => {
-                    if (this.get('modified')) {
+                    if (this.modified) {
                         try {
                             if (remoteKey && remoteDb.meta.keyChanged > this.db.meta.keyChanged) {
                                 this.db.credentials = remoteDb.credentials;
-                                this.set('keyFileName', remoteKey.keyFileName || '');
+                                this.keyFileName = remoteKey.keyFileName || '';
                                 if (remoteKey.password) {
-                                    this.set('passwordLength', remoteKey.password.textLength);
+                                    this.passwordLength = remoteKey.password.textLength;
                                 }
                             }
                             this.db.merge(remoteDb);
@@ -271,7 +312,7 @@ const FileModel = Backbone.Model.extend({
                     } else {
                         this.db = remoteDb;
                     }
-                    this.set('dirty', true);
+                    this.dirty = true;
                     this.reload();
                     callback();
                 })
@@ -280,43 +321,45 @@ const FileModel = Backbone.Model.extend({
                     callback(err);
                 });
         });
-    },
+    }
 
-    getLocalEditState: function() {
+    getLocalEditState() {
         return this.db.getLocalEditState();
-    },
+    }
 
-    setLocalEditState: function(editState) {
+    setLocalEditState(editState) {
         this.db.setLocalEditState(editState);
-    },
+    }
 
-    close: function() {
+    close() {
         this.set({
             keyFileName: '',
             passwordLength: 0,
             modified: false,
             dirty: false,
-            open: false,
+            active: false,
             created: false,
             groups: null,
             passwordChanged: false,
             keyFileChanged: false,
             syncing: false
         });
-    },
+    }
 
-    getEntry: function(id) {
+    getEntry(id) {
         return this.entryMap[id];
-    },
+    }
 
-    getGroup: function(id) {
+    getGroup(id) {
         return this.groupMap[id];
-    },
+    }
 
-    forEachEntry: function(filter, callback) {
+    forEachEntry(filter, callback) {
         let top = this;
         if (filter.trash) {
-            top = this.getGroup(this.db.meta.recycleBinUuid ? this.subId(this.db.meta.recycleBinUuid.id) : null);
+            top = this.getGroup(
+                this.db.meta.recycleBinUuid ? this.subId(this.db.meta.recycleBinUuid.id) : null
+            );
         } else if (filter.group) {
             top = this.getGroup(filter.group);
         }
@@ -330,68 +373,82 @@ const FileModel = Backbone.Model.extend({
                 }, filter);
             }
         }
-    },
+    }
 
-    forEachGroup: function(callback, filter) {
-        this.get('groups').forEach(group => {
+    forEachGroup(callback, filter) {
+        this.groups.forEach(group => {
             if (callback(group) !== false) {
                 group.forEachGroup(callback, filter);
             }
         });
-    },
+    }
 
-    getTrashGroup: function() {
-        return this.db.meta.recycleBinEnabled ? this.getGroup(this.subId(this.db.meta.recycleBinUuid.id)) : null;
-    },
+    getTrashGroup() {
+        return this.db.meta.recycleBinEnabled
+            ? this.getGroup(this.subId(this.db.meta.recycleBinUuid.id))
+            : null;
+    }
 
-    getEntryTemplatesGroup: function() {
-        return this.db.meta.entryTemplatesGroup ? this.getGroup(this.subId(this.db.meta.entryTemplatesGroup.id)) : null;
-    },
+    getEntryTemplatesGroup() {
+        return this.db.meta.entryTemplatesGroup
+            ? this.getGroup(this.subId(this.db.meta.entryTemplatesGroup.id))
+            : null;
+    }
 
-    createEntryTemplatesGroup: function() {
-        const rootGroup = this.get('groups').first();
+    createEntryTemplatesGroup() {
+        const rootGroup = this.groups[0];
         const templatesGroup = GroupModel.newGroup(rootGroup, this);
         templatesGroup.setName('Templates');
         this.db.meta.entryTemplatesGroup = templatesGroup.group.uuid;
         this.reload();
         return templatesGroup;
-    },
+    }
 
-    setModified: function() {
-        if (!this.get('demo')) {
+    setModified() {
+        if (!this.demo) {
             this.set({ modified: true, dirty: true });
-            Backbone.trigger('file-modified');
+            Events.emit('file-modified');
         }
-    },
+    }
 
-    getData: function(cb) {
+    getData(cb) {
         this.db.cleanup({
             historyRules: true,
             customIcons: true,
             binaries: true
         });
         this.db.cleanup({ binaries: true });
-        this.db.save()
+        this.db
+            .save()
             .then(data => {
                 cb(data);
             })
             .catch(err => {
-                logger.error('Error saving file', this.get('name'), err);
+                logger.error('Error saving file', this.name, err);
                 cb(undefined, err);
             });
-    },
+    }
 
-    getXml: function(cb) {
-        this.db.saveXml()
-            .then(xml => { cb(xml); });
-    },
+    getXml(cb) {
+        this.db.saveXml(true).then(xml => {
+            cb(xml);
+        });
+    }
 
-    getKeyFileHash: function() {
+    getHtml(cb) {
+        cb(
+            KdbxToHtml.convert(this.db, {
+                name: this.name
+            })
+        );
+    }
+
+    getKeyFileHash() {
         const hash = this.db.credentials.keyFileHash;
         return hash ? kdbxweb.ByteUtils.bytesToBase64(hash.getBinary()) : null;
-    },
+    }
 
-    forEachEntryTemplate: function(callback) {
+    forEachEntryTemplate(callback) {
         if (!this.db.meta.entryTemplatesGroup) {
             return;
         }
@@ -400,89 +457,89 @@ const FileModel = Backbone.Model.extend({
             return;
         }
         group.forEachOwnEntry({}, callback);
-    },
+    }
 
-    setSyncProgress: function() {
+    setSyncProgress() {
         this.set({ syncing: true });
-    },
+    }
 
-    setSyncComplete: function(path, storage, error, savedToCache) {
+    setSyncComplete(path, storage, error, savedToCache) {
         if (!error) {
             this.db.removeLocalEditState();
         }
-        const modified = this.get('modified') && !!error;
-        const dirty = this.get('dirty') && !savedToCache;
+        const modified = this.modified && !!error;
+        const dirty = this.dirty && !savedToCache;
         this.set({
             created: false,
-            path: path || this.get('path'),
-            storage: storage || this.get('storage'),
-            modified: modified,
-            dirty: dirty,
+            path: path || this.path,
+            storage: storage || this.storage,
+            modified,
+            dirty,
             syncing: false,
             syncError: error
         });
 
-        const shouldResetFingerprint = this.get('passwordChanged') && this.has('fingerprint');
+        const shouldResetFingerprint = this.passwordChanged && this.fingerprint;
         if (shouldResetFingerprint && !error) {
-            this.set({ fingerprint: null });
+            this.fingerprint = null;
         }
 
-        if (!this.get('open')) {
+        if (!this.open) {
             return;
         }
-        this.setOpenFile({ passwordLength: this.get('passwordLength') });
+        this.setOpenFile({ passwordLength: this.passwordLength });
         this.forEachEntry({ includeDisabled: true }, entry => entry.setSaved());
-    },
+    }
 
-    setPassword: function(password) {
+    setPassword(password) {
         this.db.credentials.setPassword(password);
         this.db.meta.keyChanged = new Date();
         this.set({ passwordLength: password.textLength, passwordChanged: true });
         this.setModified();
-    },
+    }
 
-    resetPassword: function() {
-        this.db.credentials.passwordHash = this._oldPasswordHash;
-        if (this.db.credentials.keyFileHash === this._oldKeyFileHash) {
-            this.db.meta.keyChanged = this._oldKeyChangeDate;
+    resetPassword() {
+        this.db.credentials.passwordHash = this.oldPasswordHash;
+        if (this.db.credentials.keyFileHash === this.oldKeyFileHash) {
+            this.db.meta.keyChanged = this.oldKeyChangeDate;
         }
-        this.set({ passwordLength: this.get('oldPasswordLength'), passwordChanged: false });
-    },
+        this.set({ passwordLength: this.oldPasswordLength, passwordChanged: false });
+    }
 
-    setKeyFile: function(keyFile, keyFileName) {
+    setKeyFile(keyFile, keyFileName) {
         this.db.credentials.setKeyFile(keyFile);
         this.db.meta.keyChanged = new Date();
-        this.set({ keyFileName: keyFileName, keyFileChanged: true });
+        this.set({ keyFileName, keyFileChanged: true });
         this.setModified();
-    },
+    }
 
-    generateAndSetKeyFile: function() {
+    generateAndSetKeyFile() {
         const keyFile = kdbxweb.Credentials.createRandomKeyFile();
         const keyFileName = 'Generated';
         this.setKeyFile(keyFile, keyFileName);
         return keyFile;
-    },
+    }
 
-    resetKeyFile: function() {
-        this.db.credentials.keyFileHash = this._oldKeyFileHash;
-        if (this.db.credentials.passwordHash === this._oldPasswordHash) {
-            this.db.meta.keyChanged = this._oldKeyChangeDate;
+    resetKeyFile() {
+        this.db.credentials.keyFileHash = this.oldKeyFileHash;
+        if (this.db.credentials.passwordHash === this.oldPasswordHash) {
+            this.db.meta.keyChanged = this.oldKeyChangeDate;
         }
-        this.set({ keyFileName: this.get('oldKeyFileName'), keyFileChanged: false });
-    },
+        this.set({ keyFileName: this.oldKeyFileName, keyFileChanged: false });
+    }
 
-    removeKeyFile: function() {
+    removeKeyFile() {
         this.db.credentials.keyFileHash = null;
-        const changed = !!this._oldKeyFileHash;
-        if (!changed && this.db.credentials.passwordHash === this._oldPasswordHash) {
-            this.db.meta.keyChanged = this._oldKeyChangeDate;
+        const changed = !!this.oldKeyFileHash;
+        if (!changed && this.db.credentials.passwordHash === this.oldPasswordHash) {
+            this.db.meta.keyChanged = this.oldKeyChangeDate;
         }
         this.set({ keyFileName: '', keyFilePath: '', keyFileChanged: changed });
-        Backbone.trigger('unset-keyfile', this.id);
+        Events.emit('unset-keyfile', this.id);
         this.setModified();
-    },
+    }
 
-    isKeyChangePending: function(force) {
+    isKeyChangePending(force) {
         if (!this.db.meta.keyChanged) {
             return false;
         }
@@ -492,63 +549,63 @@ const FileModel = Backbone.Model.extend({
         }
         const daysDiff = (Date.now() - this.db.meta.keyChanged) / 1000 / 3600 / 24;
         return daysDiff > expiryDays;
-    },
+    }
 
-    setKeyChange: function(force, days) {
+    setKeyChange(force, days) {
         if (isNaN(days) || !days || days < 0) {
             days = -1;
         }
         const prop = force ? 'keyChangeForce' : 'keyChangeRec';
         this.db.meta[prop] = days;
-        this.set(prop, days);
+        this[prop] = days;
         this.setModified();
-    },
+    }
 
-    setName: function(name) {
+    setName(name) {
         this.db.meta.name = name;
         this.db.meta.nameChanged = new Date();
-        this.set('name', name);
-        this.get('groups').first().setName(name);
+        this.name = name;
+        this.groups[0].setName(name);
         this.setModified();
         this.reload();
-    },
+    }
 
-    setDefaultUser: function(defaultUser) {
+    setDefaultUser(defaultUser) {
         this.db.meta.defaultUser = defaultUser;
         this.db.meta.defaultUserChanged = new Date();
-        this.set('defaultUser', defaultUser);
+        this.defaultUser = defaultUser;
         this.setModified();
-    },
+    }
 
-    setRecycleBinEnabled: function(enabled) {
+    setRecycleBinEnabled(enabled) {
         enabled = !!enabled;
         this.db.meta.recycleBinEnabled = enabled;
         if (enabled) {
             this.db.createRecycleBin();
         }
-        this.set('setRecycleBinEnabled', enabled);
+        this.recycleBinEnabled = enabled;
         this.setModified();
-    },
+    }
 
-    setHistoryMaxItems: function(count) {
+    setHistoryMaxItems(count) {
         this.db.meta.historyMaxItems = count;
-        this.set('historyMaxItems', count);
+        this.historyMaxItems = count;
         this.setModified();
-    },
+    }
 
-    setHistoryMaxSize: function(size) {
+    setHistoryMaxSize(size) {
         this.db.meta.historyMaxSize = size;
-        this.set('historyMaxSize', size);
+        this.historyMaxSize = size;
         this.setModified();
-    },
+    }
 
-    setKeyEncryptionRounds: function(rounds) {
+    setKeyEncryptionRounds(rounds) {
         this.db.header.keyEncryptionRounds = rounds;
-        this.set('keyEncryptionRounds', rounds);
+        this.keyEncryptionRounds = rounds;
         this.setModified();
-    },
+    }
 
-    setKdfParameter: function(field, value) {
+    setKdfParameter(field, value) {
         const ValueType = kdbxweb.VarDictionary.ValueType;
         switch (field) {
             case 'memory':
@@ -560,50 +617,127 @@ const FileModel = Backbone.Model.extend({
             case 'parallelism':
                 this.db.header.kdfParameters.set('P', ValueType.UInt32, value);
                 break;
+            case 'rounds':
+                this.db.header.kdfParameters.set('R', ValueType.UInt32, value);
+                break;
             default:
                 return;
         }
-        this.set('kdfParameters', this.readKdfParams());
+        this.kdfParameters = this.readKdfParams();
         this.setModified();
-    },
+    }
 
-    emptyTrash: function() {
+    emptyTrash() {
         const trashGroup = this.getTrashGroup();
         if (trashGroup) {
             let modified = false;
-            trashGroup.getOwnSubGroups().slice().forEach(function(group) {
-                this.db.move(group, null);
-                modified = true;
-            }, this);
+            trashGroup
+                .getOwnSubGroups()
+                .slice()
+                .forEach(function(group) {
+                    this.db.move(group, null);
+                    modified = true;
+                }, this);
             trashGroup.group.entries.slice().forEach(function(entry) {
                 this.db.move(entry, null);
                 modified = true;
             }, this);
-            trashGroup.get('items').reset();
-            trashGroup.get('entries').reset();
+            trashGroup.items.length = 0;
+            trashGroup.entries.length = 0;
             if (modified) {
                 this.setModified();
             }
         }
-    },
+    }
 
-    getCustomIcons: function() {
-        return _.mapObject(this.db.meta.customIcons, customIcon => IconUrl.toDataUrl(customIcon));
-    },
+    getCustomIcons() {
+        return mapObject(this.db.meta.customIcons, customIcon =>
+            IconUrlFormat.toDataUrl(customIcon)
+        );
+    }
 
-    addCustomIcon: function(iconData) {
+    addCustomIcon(iconData) {
         const uuid = kdbxweb.KdbxUuid.random();
-        this.db.meta.customIcons[uuid] = kdbxweb.ByteUtils.arrayToBuffer(kdbxweb.ByteUtils.base64ToBytes(iconData));
+        this.db.meta.customIcons[uuid] = kdbxweb.ByteUtils.arrayToBuffer(
+            kdbxweb.ByteUtils.base64ToBytes(iconData)
+        );
         return uuid.toString();
-    },
+    }
 
-    renameTag: function(from, to) {
+    renameTag(from, to) {
         this.forEachEntry({}, entry => entry.renameTag(from, to));
     }
+
+    setFormatVersion(version) {
+        this.db.setVersion(version);
+        this.setModified();
+        this.readModel();
+    }
+
+    setKdf(kdfName) {
+        const kdfParameters = this.db.header.kdfParameters;
+        if (!kdfParameters) {
+            throw new Error('Cannot set KDF on this version');
+        }
+        switch (kdfName) {
+            case 'Aes':
+                this.db.setKdf(kdbxweb.Consts.KdfId.Aes);
+                break;
+            case 'Argon2':
+                this.db.setKdf(kdbxweb.Consts.KdfId.Argon2);
+                break;
+            default:
+                throw new Error('Bad KDF name');
+        }
+        this.setModified();
+        this.readModel();
+    }
+
+    static createKeyFileWithHash(hash) {
+        return kdbxweb.Credentials.createKeyFileWithHash(hash);
+    }
+}
+
+FileModel.defineModelProperties({
+    id: '',
+    uuid: '',
+    name: '',
+    db: null,
+    entryMap: null,
+    groupMap: null,
+    keyFileName: '',
+    keyFilePath: null,
+    passwordLength: 0,
+    path: '',
+    opts: null,
+    storage: null,
+    modified: false,
+    dirty: false,
+    active: false,
+    created: false,
+    demo: false,
+    groups: null,
+    oldPasswordLength: 0,
+    oldKeyFileName: '',
+    passwordChanged: false,
+    keyFileChanged: false,
+    keyChangeForce: -1,
+    syncing: false,
+    syncError: null,
+    syncDate: null,
+    backup: null,
+    formatVersion: null,
+    defaultUser: null,
+    recycleBinEnabled: null,
+    historyMaxItems: null,
+    historyMaxSize: null,
+    keyEncryptionRounds: null,
+    kdfName: null,
+    kdfParameters: null,
+    fingerprint: null,
+    oldPasswordHash: null,
+    oldKeyFileHash: null,
+    oldKeyChangeDate: null
 });
 
-FileModel.createKeyFileWithHash = function(hash) {
-    return kdbxweb.Credentials.createKeyFileWithHash(hash);
-};
-
-module.exports = FileModel;
+export { FileModel };

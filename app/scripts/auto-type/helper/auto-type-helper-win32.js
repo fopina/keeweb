@@ -1,20 +1,25 @@
-const Launcher = require('../../comp/launcher');
-const AutoTypeNativeHelper = require('./auto-type-native-helper');
+import { AutoTypeNativeHelper } from 'auto-type/helper/auto-type-native-helper';
+import { Launcher } from 'comp/launcher';
 
-const AutoTypeHelper = function() {
-};
+const AutoTypeHelper = function() {};
 
-AutoTypeHelper.prototype.getActiveWindowTitle = function(callback) {
+AutoTypeHelper.prototype.getActiveWindowInfo = function(callback) {
     Launcher.spawn({
         cmd: AutoTypeNativeHelper.getHelperPath(),
         args: ['--window-info'],
-        complete: function(err, out) {
-            if (err) { return callback(err); }
-            const parts = out.split('\n');
-            return callback(null, (parts[0] || '').trim(),
-                parts[1] ? parts[1].trim() : undefined);
+        complete(err, out) {
+            if (err) {
+                return callback(err);
+            }
+            const [id, title, url] = out.trim().split('\n');
+            const windowInfo = {
+                id,
+                title,
+                url
+            };
+            return callback(null, windowInfo);
         }
     });
 };
 
-module.exports = AutoTypeHelper;
+export { AutoTypeHelper };

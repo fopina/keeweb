@@ -1,12 +1,14 @@
 /* eslint-env node */
 
-const fs = require('fs');
+const fs = require('fs-extra');
+const path = require('path');
+const debug = require('debug');
 
-const sass = require('node-sass');
-
-const webpackConfig = require('./webpack.config');
-const postCssReplaceFont = require('./build/util/postcss-replace-font');
+const webpackConfig = require('./build/webpack.config');
+const webpackConfigTest = require('./test/test.webpack.config');
 const pkg = require('./package.json');
+
+debug.enable('electron-notarize');
 
 module.exports = function(grunt) {
     require('time-grunt')(grunt);
@@ -22,10 +24,20 @@ module.exports = function(grunt) {
 
     const dt = date.toISOString().replace(/T.*/, '');
     const year = date.getFullYear();
-    const minElectronVersionForUpdate = '4.0.1';
+    const minElectronVersionForUpdate = '8.0.0';
     const zipCommentPlaceholderPart = 'zip_comment_placeholder_that_will_be_replaced_with_hash';
-    const zipCommentPlaceholder = zipCommentPlaceholderPart + '.'.repeat(512 - zipCommentPlaceholderPart.length);
+    const zipCommentPlaceholder =
+        zipCommentPlaceholderPart + '.'.repeat(512 - zipCommentPlaceholderPart.length);
     const electronVersion = pkg.dependencies.electron.replace(/^\D/, '');
+    const getCodeSingConfig = () => require('./keys/codesign.json');
+
+    const webpackOptions = {
+        date,
+        beta: !!grunt.option('beta'),
+        get sha() {
+            return grunt.config.get('gitinfo.local.branch.current.shortSHA');
+        }
+    };
 
     grunt.initConfig({
         gitinfo: {
@@ -47,6 +59,13 @@ module.exports = function(grunt) {
             html: {
                 src: 'app/index.html',
                 dest: 'tmp/index.html',
+                nonull: true
+            },
+            'content-dist': {
+                cwd: 'app/content/',
+                src: '**',
+                dest: 'dist/',
+                expand: true,
                 nonull: true
             },
             favicon: {
@@ -89,6 +108,11 @@ module.exports = function(grunt) {
                 expand: true,
                 flatten: true
             },
+            'desktop-html': {
+                src: 'dist/index.html',
+                dest: 'tmp/desktop/app/index.html',
+                nonull: true
+            },
             'desktop-app-content': {
                 cwd: 'desktop/',
                 src: ['**', '!package-lock.json'],
@@ -97,7 +121,7 @@ module.exports = function(grunt) {
                 nonull: true
             },
             'desktop-update': {
-                cwd: 'tmp/desktop/KeeWeb-darwin-x64/KeeWeb.app/Contents/Resources/',
+                cwd: 'tmp/desktop/keeweb-linux-x64/resources/',
                 src: 'app.asar',
                 dest: 'tmp/desktop/update/',
                 expand: true,
@@ -118,20 +142,6 @@ module.exports = function(grunt) {
                 dest: 'tmp/desktop/KeeWeb-win32-x64/Resources/',
                 nonull: true
             },
-            'desktop-darwin-helper-x64': {
-                src: 'helper/darwin/KeeWebHelper',
-                dest: 'tmp/desktop/KeeWeb-darwin-x64/KeeWeb.app/Contents/Resources/',
-                nonull: true,
-                options: { mode: '0755' }
-            },
-            'desktop-darwin-installer': {
-                cwd: 'package/osx/KeeWeb Installer.app',
-                dest: 'tmp/desktop/KeeWeb-darwin-x64/KeeWeb.app/Contents/Installer/KeeWeb Installer.app',
-                src: '**',
-                expand: true,
-                nonull: true,
-                options: { mode: true }
-            },
             'desktop-win32-dist-x64': {
                 src: 'tmp/desktop/KeeWeb.win.x64.exe',
                 dest: `dist/desktop/KeeWeb-${pkg.version}.win.x64.exe`,
@@ -141,41 +151,47 @@ module.exports = function(grunt) {
                 src: 'tmp/desktop/KeeWeb.win.ia32.exe',
                 dest: `dist/desktop/KeeWeb-${pkg.version}.win.ia32.exe`,
                 nonull: true
+            },
+            'electron-builder-dist-linux-rpm': {
+                src: `tmp/desktop/electron-builder/KeeWeb-${pkg.version}.x86_64.rpm`,
+                dest: `dist/desktop/KeeWeb-${pkg.version}.linux.x86_64.rpm`,
+                nonull: true
+            },
+            'electron-builder-dist-linux-snap': {
+                src: `tmp/desktop/electron-builder/KeeWeb_${pkg.version}_amd64.snap`,
+                dest: `dist/desktop/KeeWeb-${pkg.version}.linux.snap`,
+                nonull: true
+            },
+            'electron-builder-dist-linux-appimage': {
+                src: `tmp/desktop/electron-builder/keeweb-${pkg.version}.AppImage`,
+                dest: `dist/desktop/KeeWeb-${pkg.version}.linux.AppImage`,
+                nonull: true
             }
         },
         eslint: {
             app: ['app/scripts/**/*.js'],
             desktop: ['desktop/**/*.js', '!desktop/node_modules/**'],
-            grunt: ['Gruntfile.js', 'grunt/**/*.js']
-        },
-        sass: {
-            options: {
-                sourceMap: false,
-                includePaths: ['./node_modules'],
-                implementation: sass
-            },
-            dist: {
-                files: {
-                    'tmp/css/main.css': 'app/styles/main.scss'
-                }
-            }
-        },
-        postcss: {
-            options: {
-                processors: [
-                    postCssReplaceFont,
-                    require('cssnano')({discardComments: {removeAll: true}})
-                ]
-            },
-            dist: {
-                src: 'tmp/css/main.css',
-                dest: 'tmp/css/main.css'
-            }
+            build: ['Gruntfile.js', 'grunt.*.js', 'build/**/*.js', 'webpack.config.js'],
+            plugins: ['plugins/**/*.js'],
+            util: ['util/**/*.js']
         },
         inline: {
             app: {
                 src: 'tmp/index.html',
                 dest: 'tmp/app.html'
+            }
+        },
+        'csp-hashes': {
+            options: {
+                algo: 'sha512',
+                expected: {
+                    style: 1,
+                    script: 3
+                }
+            },
+            app: {
+                src: 'tmp/app.html',
+                dest: 'dist/index.html'
             }
         },
         htmlmin: {
@@ -185,7 +201,7 @@ module.exports = function(grunt) {
             },
             app: {
                 files: {
-                    'dist/index.html': 'tmp/app.html'
+                    'tmp/app.html': 'tmp/app.html'
                 }
             }
         },
@@ -193,37 +209,68 @@ module.exports = function(grunt) {
             manifest: {
                 options: {
                     replacements: [
-                        { pattern: '# YYYY-MM-DD:v0.0.0', replacement: '# ' + dt + ':v' + pkg.version },
-                        { pattern: '# updmin:v0.0.0', replacement: '# updmin:v' + minElectronVersionForUpdate }
+                        {
+                            pattern: '# YYYY-MM-DD:v0.0.0',
+                            replacement: '# ' + dt + ':v' + pkg.version
+                        },
+                        {
+                            pattern: '# updmin:v0.0.0',
+                            replacement: '# updmin:v' + minElectronVersionForUpdate
+                        }
                     ]
                 },
                 files: { 'dist/manifest.appcache': 'app/manifest.appcache' }
             },
-            'manifest-html': {
-                options: { replacements: [{ pattern: '<html', replacement: '<html manifest="manifest.appcache"' }] },
-                files: { 'dist/index.html': 'dist/index.html' }
-            },
-            'desktop-html': {
-                options: { replacements: [{ pattern: ' manifest="manifest.appcache"', replacement: '' }] },
-                files: { 'tmp/desktop/app/index.html': 'dist/index.html' }
+            'service-worker': {
+                options: { replacements: [{ pattern: '0.0.0', replacement: pkg.version }] },
+                files: { 'dist/service-worker.js': 'app/service-worker.js' }
             },
             'desktop-public-key': {
-                options: { replacements: [{ pattern: '\'@@PUBLIC_KEY_CONTENT\'', replacement:
-                    '`' + fs.readFileSync('app/resources/public-key.pem', {encoding: 'utf8'}).trim() + '`' }] },
+                options: {
+                    replacements: [
+                        {
+                            pattern: "'@@PUBLIC_KEY_CONTENT'",
+                            replacement:
+                                '`' +
+                                fs
+                                    .readFileSync('app/resources/public-key.pem', {
+                                        encoding: 'utf8'
+                                    })
+                                    .trim() +
+                                '`'
+                        }
+                    ]
+                },
                 files: { 'tmp/desktop/app/main.js': 'desktop/main.js' }
             },
             'cordova-html': {
-                options: { replacements: [{ pattern: '<script', replacement: '<script src="cordova.js"></script><script' }] },
+                options: {
+                    replacements: [
+                        {
+                            pattern: '<script',
+                            replacement: '<script src="cordova.js"></script><script'
+                        }
+                    ]
+                },
                 files: { 'tmp/cordova/app/index.html': 'dist/index.html' }
             }
         },
         webpack: {
-            js: webpackConfig.config(grunt)
+            app: webpackConfig.config(webpackOptions),
+            test: webpackConfigTest
         },
         'webpack-dev-server': {
             options: {
-                webpack: webpackConfig.devServerConfig(grunt),
-                publicPath: '/tmp/js',
+                webpack: webpackConfig.config({
+                    ...webpackOptions,
+                    mode: 'development',
+                    sha: 'dev'
+                }),
+                publicPath: '/',
+                contentBase: [
+                    path.resolve(__dirname, 'tmp'),
+                    path.resolve(__dirname, 'app/content')
+                ],
                 progress: false
             },
             js: {
@@ -231,51 +278,23 @@ module.exports = function(grunt) {
                 port: 8085
             }
         },
-        uglify: {
-            options: {
-                preserveComments: false
-            },
-            app: {
-                files: { 'tmp/js/app.js': ['tmp/js/app.js'] }
-            },
-            vendor: {
-                options: {
-                    mangle: false,
-                    compress: false
-                },
-                files: { 'tmp/js/vendor.js': ['tmp/js/vendor.js'] }
-            }
-        },
-        watch: {
-            options: {
-                interrupt: true,
-                debounceDelay: 500
-            },
-            styles: {
-                files: 'app/styles/**/*.scss',
-                tasks: ['sass']
-            },
-            indexhtml: {
-                files: 'app/index.html',
-                tasks: ['copy:html']
-            }
-        },
         electron: {
             options: {
                 name: 'KeeWeb',
                 dir: 'tmp/desktop/app',
                 out: 'tmp/desktop',
-                electronVersion: electronVersion,
+                electronVersion,
                 overwrite: true,
                 asar: true,
-                'appCopyright': `Copyright © ${year} Antelle`,
-                'appVersion': pkg.version,
-                'buildVersion': '<%= gitinfo.local.branch.current.shortSHA %>'
+                appCopyright: `Copyright © ${year} Antelle`,
+                appVersion: pkg.version,
+                buildVersion: '<%= gitinfo.local.branch.current.shortSHA %>'
             },
             linux: {
                 options: {
+                    name: 'keeweb',
                     platform: 'linux',
-                    arch: ['x64', 'ia32'],
+                    arch: ['x64'],
                     icon: 'graphics/icon.ico'
                 }
             },
@@ -284,9 +303,63 @@ module.exports = function(grunt) {
                     platform: 'darwin',
                     arch: ['x64'],
                     icon: 'graphics/icon.icns',
-                    'appBundleId': 'net.antelle.keeweb',
-                    'appCategoryType': 'public.app-category.productivity',
-                    'extendInfo': 'package/osx/extend.plist'
+                    appBundleId: 'net.antelle.keeweb',
+                    appCategoryType: 'public.app-category.productivity',
+                    extendInfo: 'package/osx/extend.plist',
+                    osxSign: {
+                        get identity() {
+                            return getCodeSingConfig().identities.app;
+                        },
+                        hardenedRuntime: true,
+                        entitlements: 'package/osx/entitlements.mac.plist',
+                        'entitlements-inherit': 'package/osx/entitlements.mac.plist',
+                        'gatekeeper-assess': false
+                    },
+                    osxNotarize: {
+                        get appleId() {
+                            return getCodeSingConfig().appleId;
+                        },
+                        appleIdPassword: '@keychain:AC_PASSWORD',
+                        get ascProvider() {
+                            return getCodeSingConfig().teamId;
+                        }
+                    },
+                    afterCopy: [
+                        (buildPath, electronVersion, platform, arch, callback) => {
+                            if (path.basename(buildPath) !== 'app') {
+                                throw new Error('Bad build path: ' + buildPath);
+                            }
+                            const resPath = path.dirname(buildPath);
+                            if (path.basename(resPath) !== 'Resources') {
+                                throw new Error('Bad Resources path: ' + resPath);
+                            }
+                            const helperTargetPath = path.join(
+                                resPath,
+                                'helper/darwin/KeeWebHelper'
+                            );
+                            const helperSourcePath = path.join(
+                                __dirname,
+                                'helper/darwin/KeeWebHelper'
+                            );
+                            fs.copySync(helperSourcePath, helperTargetPath);
+
+                            const contentsPath = path.dirname(resPath);
+                            if (path.basename(contentsPath) !== 'Contents') {
+                                throw new Error('Bad Contents path: ' + contentsPath);
+                            }
+                            const installerSourcePath = path.join(
+                                __dirname,
+                                'package/osx/KeeWeb Installer.app'
+                            );
+                            const installerTargetPath = path.join(
+                                contentsPath,
+                                'Installer/KeeWeb Installer.app'
+                            );
+                            fs.copySync(installerSourcePath, installerTargetPath);
+
+                            callback();
+                        }
+                    ]
                 }
             },
             win32: {
@@ -294,30 +367,49 @@ module.exports = function(grunt) {
                     platform: 'win32',
                     arch: ['ia32', 'x64'],
                     icon: 'graphics/icon.ico',
-                    'buildVersion': pkg.version,
+                    buildVersion: pkg.version,
                     'version-string': {
-                        'CompanyName': 'KeeWeb',
-                        'FileDescription': pkg.description,
-                        'OriginalFilename': 'KeeWeb.exe',
-                        'ProductName': 'KeeWeb',
-                        'InternalName': 'KeeWeb'
+                        CompanyName: 'KeeWeb',
+                        FileDescription: pkg.description,
+                        OriginalFilename: 'KeeWeb.exe',
+                        ProductName: 'KeeWeb',
+                        InternalName: 'KeeWeb'
                     }
                 }
             }
         },
-        codesign: {
-            app: {
+        'electron-builder': {
+            linux: {
                 options: {
-                    identity: 'app',
-                    deep: true
-                },
-                src: ['tmp/desktop/KeeWeb-darwin-x64/KeeWeb.app']
-            },
-            dmg: {
-                options: {
-                    identity: 'app'
-                },
-                src: [`dist/desktop/KeeWeb-${pkg.version}.mac.dmg`]
+                    publish: 'never',
+                    targets: 'linux',
+                    prepackaged: 'tmp/desktop/keeweb-linux-x64',
+                    config: {
+                        appId: 'net.antelle.keeweb',
+                        productName: 'keeweb',
+                        copyright: `Copyright © ${year} Antelle`,
+                        directories: {
+                            output: 'tmp/desktop/electron-builder',
+                            app: 'desktop',
+                            buildResources: 'graphics'
+                        },
+                        fileAssociations: {
+                            ext: 'kdbx',
+                            name: 'KeePass 2 database',
+                            mimeType: 'application/x-keepass2'
+                        },
+                        linux: {
+                            target: ['AppImage', 'snap', 'rpm'],
+                            category: 'Utility'
+                        },
+                        rpm: {
+                            // depends: ['libappindicator1', 'libgconf-2-4']
+                        },
+                        snap: {
+                            stagePackages: ['libappindicator1', 'libgconf-2-4']
+                        }
+                    }
+                }
             }
         },
         compress: {
@@ -325,10 +417,11 @@ module.exports = function(grunt) {
                 level: 6
             },
             'desktop-update': {
-                options: { archive: 'dist/desktop/UpdateDesktop.zip', comment: zipCommentPlaceholder },
-                files: [
-                    { cwd: 'tmp/desktop/update', src: '**', expand: true, nonull: true }
-                ]
+                options: {
+                    archive: 'dist/desktop/UpdateDesktop.zip',
+                    comment: zipCommentPlaceholder
+                },
+                files: [{ cwd: 'tmp/desktop/update', src: '**', expand: true, nonull: true }]
             },
             'win32-x64': {
                 options: { archive: `dist/desktop/KeeWeb-${pkg.version}.win.x64.zip` },
@@ -340,13 +433,10 @@ module.exports = function(grunt) {
             },
             'linux-x64': {
                 options: { archive: `dist/desktop/KeeWeb-${pkg.version}.linux.x64.zip` },
-                files: [{ cwd: 'tmp/desktop/KeeWeb-linux-x64', src: '**', expand: true },
-                    { cwd: 'graphics', src: '128x128.png', nonull: true, expand: true }]
-            },
-            'linux-ia32': {
-                options: { archive: `dist/desktop/KeeWeb-${pkg.version}.linux.ia32.zip` },
-                files: [{ cwd: 'tmp/desktop/KeeWeb-linux-ia32', src: '**', expand: true },
-                    { cwd: 'graphics', src: '128x128.png', nonull: true, expand: true }]
+                files: [
+                    { cwd: 'tmp/desktop/keeweb-linux-x64', src: '**', expand: true },
+                    { cwd: 'graphics', src: '128x128.png', nonull: true, expand: true }
+                ]
             }
         },
         appdmg: {
@@ -359,7 +449,12 @@ module.exports = function(grunt) {
                 window: { size: { width: 658, height: 498 } },
                 contents: [
                     { x: 438, y: 344, type: 'link', path: '/Applications' },
-                    { x: 192, y: 344, type: 'file', path: 'tmp/desktop/KeeWeb-darwin-x64/KeeWeb.app' }
+                    {
+                        x: 192,
+                        y: 344,
+                        type: 'file',
+                        path: 'tmp/desktop/KeeWeb-darwin-x64/KeeWeb.app'
+                    }
                 ]
             },
             app: {
@@ -370,7 +465,9 @@ module.exports = function(grunt) {
             options: {
                 vars: {
                     version: pkg.version,
-                    rev: function() { return grunt.config.get('gitinfo.local.branch.current.shortSHA'); },
+                    rev() {
+                        return grunt.config.get('gitinfo.local.branch.current.shortSHA');
+                    },
                     homepage: pkg.homepage
                 }
             },
@@ -403,6 +500,14 @@ module.exports = function(grunt) {
                 }
             }
         },
+        chmod: {
+            'linux-desktop-x64': {
+                options: {
+                    mode: '4755'
+                },
+                src: ['tmp/desktop/keeweb-linux-x64/chrome-sandbox']
+            }
+        },
         deb: {
             options: {
                 tmpPath: 'tmp/desktop/',
@@ -412,7 +517,9 @@ module.exports = function(grunt) {
                     description: pkg.description,
                     author: pkg.author,
                     homepage: pkg.homepage,
-                    rev: function() { return grunt.config.get('gitinfo.local.branch.current.shortSHA'); }
+                    rev() {
+                        return grunt.config.get('gitinfo.local.branch.current.shortSHA');
+                    }
                 }
             },
             'linux-x64': {
@@ -430,27 +537,18 @@ module.exports = function(grunt) {
                 },
                 files: [
                     { cwd: 'package/deb/usr', src: '**', dest: '/usr', expand: true, nonull: true },
-                    { cwd: 'tmp/desktop/KeeWeb-linux-x64/', src: '**', dest: '/opt/keeweb-desktop', expand: true, nonull: true },
-                    { src: 'graphics/128x128.png', dest: '/usr/share/icons/hicolor/128x128/apps/keeweb.png', nonull: true }
-                ]
-            },
-            'linux-ia32': {
-                options: {
-                    info: {
-                        arch: 'i386',
-                        pkgName: `KeeWeb-${pkg.version}.linux.ia32.deb`,
-                        targetDir: 'dist/desktop',
-                        appName: 'KeeWeb',
-                        depends: 'libappindicator1, libgconf-2-4',
-                        scripts: {
-                            postinst: 'package/deb/scripts/postinst'
-                        }
+                    {
+                        cwd: 'tmp/desktop/keeweb-linux-x64/',
+                        src: '**',
+                        dest: '/usr/share/keeweb-desktop',
+                        expand: true,
+                        nonull: true
+                    },
+                    {
+                        src: 'graphics/128x128.png',
+                        dest: '/usr/share/icons/hicolor/128x128/apps/keeweb.png',
+                        nonull: true
                     }
-                },
-                files: [
-                    { cwd: 'package/deb/usr', src: '**', dest: '/usr', expand: true, nonull: true },
-                    { cwd: 'tmp/desktop/KeeWeb-linux-ia32/', src: '**', dest: '/opt/keeweb-desktop', expand: true, nonull: true },
-                    { src: 'graphics/128x128.png', dest: '/usr/share/icons/hicolor/128x128/apps/keeweb.png', nonull: true }
                 ]
             }
         },
@@ -483,29 +581,25 @@ module.exports = function(grunt) {
                 }
             }
         },
-        'sign-html': {
-            'app': {
-                options: {
-                    file: 'dist/index.html',
-                    skip: grunt.option('skip-sign')
-                }
-            }
-        },
         'sign-exe': {
             options: {
-                spc: 'keys/keeweb.spc',
-                key: '01',
-                algo: 'sha256',
-                url: pkg.homepage
+                url: pkg.homepage,
+                get windows() {
+                    return getCodeSingConfig().windows;
+                },
+                get certHash() {
+                    return getCodeSingConfig().microsoftCertHash;
+                }
             },
             'win32-build-x64': {
                 options: {
                     files: {
                         'tmp/desktop/KeeWeb-win32-x64/KeeWeb.exe': 'KeeWeb',
                         'tmp/desktop/KeeWeb-win32-x64/ffmpeg.dll': '',
-                        'tmp/desktop/KeeWeb-win32-x64/libEGL.dll': 'ANGLE libEGL Dynamic Link Library',
-                        'tmp/desktop/KeeWeb-win32-x64/libGLESv2.dll': 'ANGLE libGLESv2 Dynamic Link Library',
-                        'tmp/desktop/KeeWeb-win32-x64/osmesa.dll': ''
+                        'tmp/desktop/KeeWeb-win32-x64/libEGL.dll':
+                            'ANGLE libEGL Dynamic Link Library',
+                        'tmp/desktop/KeeWeb-win32-x64/libGLESv2.dll':
+                            'ANGLE libGLESv2 Dynamic Link Library'
                     }
                 }
             },
@@ -514,9 +608,10 @@ module.exports = function(grunt) {
                     files: {
                         'tmp/desktop/KeeWeb-win32-ia32/KeeWeb.exe': 'KeeWeb',
                         'tmp/desktop/KeeWeb-win32-ia32/ffmpeg.dll': '',
-                        'tmp/desktop/KeeWeb-win32-ia32/libEGL.dll': 'ANGLE libEGL Dynamic Link Library',
-                        'tmp/desktop/KeeWeb-win32-ia32/libGLESv2.dll': 'ANGLE libGLESv2 Dynamic Link Library',
-                        'tmp/desktop/KeeWeb-win32-ia32/osmesa.dll': ''
+                        'tmp/desktop/KeeWeb-win32-ia32/libEGL.dll':
+                            'ANGLE libEGL Dynamic Link Library',
+                        'tmp/desktop/KeeWeb-win32-ia32/libGLESv2.dll':
+                            'ANGLE libGLESv2 Dynamic Link Library'
                     }
                 }
             },
@@ -549,24 +644,24 @@ module.exports = function(grunt) {
                 }
             }
         },
-        'concurrent': {
-            options: {
-                logConcurrentOutput: true
-            },
-            'dev-server': [
-                'watch:styles',
-                'webpack-dev-server'
-            ]
-        },
         'sign-dist': {
-            'dist': {
+            dist: {
                 options: {
                     sign: 'dist/desktop/Verify.sign.sha256'
                 },
                 files: {
-                    'dist/desktop/Verify.sha256': ['dist/desktop/KeeWeb-*', 'dist/desktop/UpdateDesktop.zip']
+                    'dist/desktop/Verify.sha256': [
+                        'dist/desktop/KeeWeb-*',
+                        'dist/desktop/UpdateDesktop.zip'
+                    ]
                 }
             }
+        },
+        'run-test': {
+            options: {
+                headless: true
+            },
+            default: 'test/runner.html'
         }
     });
 };

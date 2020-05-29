@@ -1,19 +1,44 @@
-const FieldViewText = require('./field-view-text');
+import { FieldViewText } from 'views/fields/field-view-text';
+import { escape } from 'util/fn';
 
-const FieldViewUrl = FieldViewText.extend({
-    displayUrlRegex: /^http:\/\//i,
+const AllowedProtocols = ['http:', 'https:', 'ftp:', 'ftps:', 'mailto:'];
 
-    renderValue: function(value) {
-        return value ? '<a href="' + _.escape(this.fixUrl(value)) + '" rel="noreferrer noopener" target="_blank">' + _.escape(this.displayUrl(value)) + '</a>' : '';
-    },
+class FieldViewUrl extends FieldViewText {
+    displayUrlRegex = /^https:\/\//i;
+    cssClass = 'url';
 
-    fixUrl: function(url) {
-        return url.indexOf(':') < 0 ? 'http://' + url : url;
-    },
+    renderValue(value) {
+        try {
+            return value
+                ? '<a href="' +
+                      escape(this.fixUrl(value)) +
+                      '" rel="noreferrer noopener" target="_blank">' +
+                      escape(this.displayUrl(value)) +
+                      '</a>'
+                : '';
+        } catch (e) {
+            return escape(value);
+        }
+    }
 
-    displayUrl: function(url) {
+    fixUrl(url) {
+        const proto = new URL(url, 'dummy://').protocol;
+        if (proto === 'dummy:') {
+            return 'https://' + url;
+        }
+        if (!AllowedProtocols.includes(proto)) {
+            throw new Error('Bad url');
+        }
+        return url;
+    }
+
+    displayUrl(url) {
         return url.replace(this.displayUrlRegex, '');
     }
-});
 
-module.exports = FieldViewUrl;
+    getTextValue() {
+        return this.fixUrl(this.value);
+    }
+}
+
+export { FieldViewUrl };

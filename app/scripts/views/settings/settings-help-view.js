@@ -1,21 +1,38 @@
-const Backbone = require('backbone');
-const RuntimeInfo = require('../../comp/runtime-info');
-const Links = require('../../const/links');
+import { View } from 'framework/views/view';
+import { RuntimeInfo } from 'const/runtime-info';
+import { Links } from 'const/links';
+import { escape } from 'util/fn';
+import { Launcher } from 'comp/launcher';
+import template from 'templates/settings/settings-help.hbs';
 
-const SettingsHelpView = Backbone.View.extend({
-    template: require('templates/settings/settings-help.hbs'),
+class SettingsHelpView extends View {
+    template = template;
 
-    render: function() {
-        const appInfo = 'KeeWeb v' + RuntimeInfo.version + ' (' + RuntimeInfo.commit + ', ' + RuntimeInfo.buildDate + ')\n' +
-            'Environment: ' + (RuntimeInfo.launcher ? RuntimeInfo.launcher : 'web') + '\n' +
-            'User-Agent: ' + RuntimeInfo.userAgent;
-        this.renderTemplate({
-            issueLink: Links.Repo + '/issues/new?body=' + encodeURIComponent('!please describe your issue here!\n\n' + appInfo),
+    render() {
+        const appInfo =
+            'KeeWeb v' +
+            RuntimeInfo.version +
+            ' (' +
+            RuntimeInfo.commit +
+            ', ' +
+            RuntimeInfo.buildDate +
+            ')\n' +
+            'Environment: ' +
+            (Launcher ? Launcher.name + ' v' + Launcher.version : 'web') +
+            '\n' +
+            'User-Agent: ' +
+            navigator.userAgent;
+
+        super.render({
+            issueLink:
+                Links.Repo +
+                '/issues/new?body=' +
+                encodeURIComponent('!please describe your issue here!\n\n' + appInfo),
             desktopLink: Links.Desktop,
             webAppLink: Links.WebApp,
-            appInfo: _.escape(appInfo)
+            appInfo: escape(appInfo)
         });
     }
-});
+}
 
-module.exports = SettingsHelpView;
+export { SettingsHelpView };

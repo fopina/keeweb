@@ -1,41 +1,53 @@
-const FieldView = require('./field-view');
+import { FieldView } from 'views/fields/field-view';
+import { escape } from 'util/fn';
 
-const FieldViewSelect = FieldView.extend({
-    readonly: true,
+class FieldViewSelect extends FieldView {
+    readonly = true;
 
-    renderValue: function(value) {
-        return '<select>' +
-            value.map(opt => {
-                return '<option ' + 'value="' + _.escape(opt.id) + '" ' + (opt.selected ? 'selected ' : '') + '>' +
-                    _.escape(opt.value) +
-                    '</option>';
-            }).join('') +
-            '</select>';
-    },
+    renderValue(value) {
+        return (
+            '<select>' +
+            value
+                .map(opt => {
+                    return (
+                        '<option ' +
+                        'value="' +
+                        escape(opt.id) +
+                        '" ' +
+                        (opt.selected ? 'selected ' : '') +
+                        '>' +
+                        escape(opt.value) +
+                        '</option>'
+                    );
+                })
+                .join('') +
+            '</select>'
+        );
+    }
 
-    render: function() {
-        FieldView.prototype.render.call(this);
+    render() {
+        super.render();
         this.valueEl.addClass('details__field-value--select');
         this.valueEl.find('select:first').change(e => {
             this.triggerChange({ val: e.target.value, field: this.model.name });
         });
-    },
+    }
 
-    fieldLabelClick: function() {},
+    fieldLabelClick() {}
 
-    fieldValueClick: function() {},
+    fieldValueClick() {}
 
-    edit: function() {},
+    edit() {}
 
-    startEdit: function() {},
+    startEdit() {}
 
-    endEdit: function(newVal, extra) {
+    endEdit(newVal, extra) {
         if (!this.editing) {
             return;
         }
         delete this.input;
-        FieldView.prototype.endEdit.call(this, newVal, extra);
+        super.endEdit(newVal, extra);
     }
-});
+}
 
-module.exports = FieldViewSelect;
+export { FieldViewSelect };

@@ -1,23 +1,28 @@
-<div>
+<div class="settings__content">
     <h1><i class="fa fa-info"></i> {{res 'setAboutTitle'}} KeeWeb v{{version}}</h1>
-    <p>{{#res 'setAboutFirst'}}<a href="http://antelle.net" target="_blank">Antelle</a>{{/res~}}&nbsp;
+    <p>{{#res 'setAboutFirst'}}<a href="https://antelle.net" target="_blank">Antelle</a>{{/res~}}&nbsp;
         {{~#res 'setAboutSecond'}}<a href="{{licenseLink}}" target="_blank">MIT</a>{{/res}}
         {{#res 'setAboutSource'}}<a href="{{repoLink}}" target="_blank">GitHub <i class="fa fa-github-alt"></i></a>{{/res}}</p>
-    <a class="settings__donate-btn" href="{{donationLink}}" target="_blank">Donate</a>
+    <a href="{{donationLink}}" target="_blank" class="settings__donate-btn no-border">
+        <span class="settings__donate-btn-top">Become a</span><span class="settings__donate-btn-bottom">Backer</span>
+    </a>
     <p>{{res 'setAboutBuilt'}}:</p>
     <h3>Libraries</h3>
     <ul>
-        <li><a href="http://electron.atom.io/" target="_blank">electron</a><span class="muted-color">, cross-platform desktop apps framework</span></li>
-        <li><a href="http://backbonejs.org/" target="_blank">backbone</a><span class="muted-color">, JavaScript framework</span></li>
-        <li><a href="http://underscorejs.org/" target="_blank">underscore</a><span class="muted-color">, utility-belt library for JavaScript</span></li>
+        {{#if isDesktop}}<li><a href="https://electron.atom.io/" target="_blank">electron</a><span class="muted-color">, cross-platform desktop apps framework</span></li>{{/if}}
+        <li><a href="https://handlebarsjs.com/" target="_blank">handlebars</a><span class="muted-color">, semantic templates</span></li>
+        <li><a href="https://github.com/patrick-steele-idem/morphdom" target="_blank">morphdom</a><span class="muted-color">, fast and lightweight DOM diffing/patching</span></li>
+        <li><a href="https://lodash.com/" target="_blank">lodash</a><span class="muted-color">, a modern JavaScript utility library delivering modularity, performance & extras</span></li>
         <li><a href="https://jquery.com/" target="_blank">jQuery</a><span class="muted-color">, fast, small, and feature-rich JavaScript library</span></li>
-        <li><a href="http://handlebarsjs.com/" target="_blank">handlebars</a><span class="muted-color">, semantic templates</span></li>
+        <li><a href="https://marked.js.org/" target="_blank">marked</a><span class="muted-color">, a markdown parser and compiler</span></li>
+        <li><a href="https://github.com/cure53/DOMPurify" target="_blank">dompurify</a><span class="muted-color">, a DOM-only, super-fast, uber-tolerant XSS sanitizer</span></li>
+        <li><a href="https://github.com/TomFrost/node-phonetic" target="_blank">node-phonetic</a><span class="muted-color">, generates unique, pronounceable names</span></li>
     </ul>
 
     <h3>Core components</h3>
     <ul>
         <li><a href="https://github.com/keeweb/kdbxweb" target="_blank">kdbxweb</a><span class="muted-color">, web kdbx library</span></li>
-        <li><a href="http://nodeca.github.io/pako/" target="_blank">pako</a><span class="muted-color">, zlib port to JavaScript, very fast</span></li>
+        <li><a href="https://nodeca.github.io/pako/" target="_blank">pako</a><span class="muted-color">, zlib port to JavaScript, very fast</span></li>
         <li><a href="https://github.com/inexorabletash/text-encoding" target="_blank">text-encoding</a><span class="muted-color">, polyfill for the Encoding Living Standard's API</span></li>
         <li><a href="https://github.com/jindw/xmldom" target="_blank">xmldom</a><span class="muted-color">, a pure JS W3C Standard based DOMParser and XMLSerializer</span></li>
     </ul>
@@ -25,8 +30,7 @@
     <h3>UI components</h3>
     <ul>
         <li><a href="https://github.com/Diokuz/baron" target="_blank">baron</a><span class="muted-color">, native scroll with custom scrollbar</span></li>
-        <li><a href="http://dbushell.github.io/Pikaday/" target="_blank">pikaday</a><span class="muted-color">, a refreshing JavaScript datepicker</span></li>
-        <li><a href="https://github.com/TomFrost/node-phonetic" target="_blank">node-phonetic</a><span class="muted-color">, generates unique, pronounceable names</span></li>
+        <li><a href="https://dbushell.github.io/Pikaday/" target="_blank">pikaday</a><span class="muted-color">, a refreshing JavaScript datepicker</span></li>
     </ul>
 
     <h3>Desktop modules</h3>
@@ -42,9 +46,9 @@
 
     <h3>Styles</h3>
     <ul>
-        <li><a href="http://sass-lang.com/" target="_blank">sass</a><span class="muted-color">, syntactically awesome stylesheets</span></li>
-        <li><a href="http://bourbon.io/" target="_blank">bourbon</a><span class="muted-color">, a simple and lightweight mixin library for Sass</span></li>
-        <li><a href="http://bitters.bourbon.io/" target="_blank">bitters</a><span class="muted-color">, styles, variables and structure for
+        <li><a href="https://sass-lang.com/" target="_blank">sass</a><span class="muted-color">, syntactically awesome stylesheets</span></li>
+        <li><a href="https://bourbon.io/" target="_blank">bourbon</a><span class="muted-color">, a simple and lightweight mixin library for Sass</span></li>
+        <li><a href="https://github.com/thoughtbot/bitters" target="_blank">bitters</a><span class="muted-color">, styles, variables and structure for
             Bourbon projects</span></li>
         <li><a href="https://necolas.github.io/normalize.css/" target="_blank">normalize.css</a><span class="muted-color">, a modern, HTML5-ready alternative
             to CSS resets</span></li>

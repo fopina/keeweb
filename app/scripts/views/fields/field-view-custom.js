@@ -1,28 +1,28 @@
-const Backbone = require('backbone');
-const FieldViewText = require('./field-view-text');
-const FieldView = require('./field-view');
-const Keys = require('../../const/keys');
-const kdbxweb = require('kdbxweb');
-const Tip = require('../../util/tip');
-const Locale = require('../../util/locale');
+import kdbxweb from 'kdbxweb';
+import { Keys } from 'const/keys';
+import { Locale } from 'util/locale';
+import { Tip } from 'util/ui/tip';
+import { FieldView } from 'views/fields/field-view';
+import { FieldViewText } from 'views/fields/field-view-text';
 
-const FieldViewCustom = FieldViewText.extend({
-    events: {
-        'mousedown .details__field-label': 'fieldLabelMousedown'
-    },
+class FieldViewCustom extends FieldViewText {
+    constructor(model, options) {
+        super(model, options);
+        this.events = {
+            ...this.events,
+            'mousedown .details__field-label': 'fieldLabelMousedown'
+        };
+    }
 
-    initialize: function() {
-        _.extend(this.events, FieldViewText.prototype.events);
-    },
-
-    startEdit: function() {
-        FieldViewText.prototype.startEdit.call(this);
+    startEdit() {
+        super.startEdit();
         this.$el.addClass('details__field--can-edit-title');
         if (this.isProtected === undefined) {
             this.isProtected = this.value instanceof kdbxweb.ProtectedValue;
         }
         this.$el.toggleClass('details__field--protected', this.isProtected);
-        $('<div/>').addClass('details__field-value-btn details__field-value-btn-protect')
+        $('<div/>')
+            .addClass('details__field-value-btn details__field-value-btn-protect')
             .appendTo(this.valueEl)
             .mousedown(this.protectBtnClick.bind(this));
         let securityTipTitle = Locale.detLockField;
@@ -33,11 +33,11 @@ const FieldViewCustom = FieldViewText.extend({
             title: securityTipTitle
         });
         securityTip.init();
-    },
+    }
 
-    endEdit: function(newVal, extra) {
+    endEdit(newVal, extra) {
         this.$el.removeClass('details__field--can-edit-title');
-        extra = _.extend({}, extra);
+        extra = { ...extra };
         if (this.model.titleChanged || this.model.newField) {
             extra.newField = this.model.title;
         }
@@ -45,7 +45,6 @@ const FieldViewCustom = FieldViewText.extend({
             return;
         }
         delete this.input;
-        this.stopListening(Backbone, 'click', this.fieldValueBlur);
         if (typeof newVal === 'string') {
             if (this.isProtected) {
                 newVal = kdbxweb.ProtectedValue.fromString(newVal);
@@ -57,29 +56,33 @@ const FieldViewCustom = FieldViewText.extend({
         if (this.model.titleChanged) {
             delete this.model.titleChanged;
         }
-    },
+    }
 
-    startEditTitle: function(emptyTitle) {
+    startEditTitle(emptyTitle) {
         const text = emptyTitle ? '' : this.model.title || '';
         this.labelInput = $('<input/>');
         this.labelEl.html('').append(this.labelInput);
-        this.labelInput.attr({ autocomplete: 'off', spellcheck: 'false' })
-            .val(text).focus()[0].setSelectionRange(text.length, text.length);
+        this.labelInput
+            .attr({ autocomplete: 'off', spellcheck: 'false' })
+            .val(text)
+            .focus()[0]
+            .setSelectionRange(text.length, text.length);
         this.labelInput.bind({
             input: this.fieldLabelInput.bind(this),
             keydown: this.fieldLabelKeydown.bind(this),
+            keyup: this.fieldLabelKeyup.bind(this),
             keypress: this.fieldLabelInput.bind(this),
             mousedown: this.fieldLabelInputClick.bind(this),
             click: this.fieldLabelInputClick.bind(this)
         });
-    },
+    }
 
-    endEditTitle: function(newTitle) {
+    endEditTitle(newTitle) {
         if (newTitle && newTitle !== this.model.title) {
             this.model.title = newTitle;
             this.model.titleChanged = true;
         } else if (newTitle === '') {
-            this.trigger('change', {
+            this.emit('change', {
                 field: '$' + this.model.title,
                 val: ''
             });
@@ -89,71 +92,76 @@ const FieldViewCustom = FieldViewText.extend({
         if (this.editing && this.input) {
             this.input.focus();
         }
-    },
+    }
 
-    fieldLabelClick: function(e) {
+    fieldLabelClick(e) {
         e.stopImmediatePropagation();
         if (this.model.newField) {
             this.startEditTitle(true);
         } else if (this.editing) {
             this.startEditTitle();
         } else {
-            FieldViewText.prototype.fieldLabelClick.call(this, e);
+            super.fieldLabelClick.call(this, e);
         }
-    },
+    }
 
-    fieldLabelMousedown: function(e) {
+    fieldLabelMousedown(e) {
         if (this.editing) {
             e.stopPropagation();
         }
-    },
+    }
 
-    fieldValueBlur: function() {
+    fieldValueBlur() {
         if (this.labelInput) {
             this.endEditTitle(this.labelInput.val());
         }
         if (this.input) {
             this.endEdit(this.input.val());
         }
-    },
+    }
 
-    fieldLabelInput: function(e) {
+    fieldLabelInput(e) {
         e.stopPropagation();
-    },
+    }
 
-    fieldLabelInputClick: function(e) {
+    fieldLabelInputClick(e) {
         e.stopPropagation();
-    },
+    }
 
-    fieldLabelKeydown: function(e) {
+    fieldLabelKeydown(e) {
         e.stopPropagation();
         const code = e.keyCode || e.which;
-        if (code === Keys.DOM_VK_RETURN) {
-            this.endEditTitle(e.target.value);
-        } else if (code === Keys.DOM_VK_ESCAPE) {
+        if (code === Keys.DOM_VK_ESCAPE) {
             this.endEditTitle();
         } else if (code === Keys.DOM_VK_TAB) {
             e.preventDefault();
             this.endEditTitle(e.target.value);
         }
-    },
+    }
 
-    fieldValueInputClick: function() {
+    fieldLabelKeyup(e) {
+        const code = e.keyCode || e.which;
+        if (code === Keys.DOM_VK_RETURN) {
+            this.endEditTitle(e.target.value);
+        }
+    }
+
+    fieldValueInputClick() {
         if (this.labelInput) {
             this.endEditTitle(this.labelInput.val());
         }
-        FieldViewText.prototype.fieldValueInputClick.call(this);
-    },
+        super.fieldValueInputClick.call(this);
+    }
 
-    protectBtnClick: function(e) {
+    protectBtnClick(e) {
         e.stopPropagation();
         this.isProtected = !this.isProtected;
         this.$el.toggleClass('details__field--protected', this.isProtected);
         if (this.labelInput) {
             this.endEditTitle(this.labelInput.val());
         }
-        this.setTimeout(function() { this.input.focus(); });
+        setTimeout(() => this.input.focus());
     }
-});
+}
 
-module.exports = FieldViewCustom;
+export { FieldViewCustom };

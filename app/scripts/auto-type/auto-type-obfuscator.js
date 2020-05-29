@@ -1,7 +1,10 @@
-const Logger = require('../util/logger');
+import { Logger } from 'util/logger';
 
-const logger = new Logger('auto-type-obfuscator');
-logger.setLevel(localStorage.autoTypeDebug ? Logger.Level.All : Logger.Level.Warn);
+const logger = new Logger(
+    'auto-type-obfuscator',
+    undefined,
+    localStorage.debugAutoType ? Logger.Level.All : Logger.Level.Warn
+);
 
 const MaxFakeOps = 30;
 const MaxSteps = 1000;
@@ -33,8 +36,12 @@ AutoTypeObfuscator.prototype.obfuscate = function() {
 };
 
 AutoTypeObfuscator.prototype.finished = function() {
-    return this.chars.length === this.inputChars.length &&
-        this.chars.every(function(ch, ix) { return this.inputChars[ix].ch === ch; }, this);
+    return (
+        this.chars.length === this.inputChars.length &&
+        this.chars.every(function(ch, ix) {
+            return this.inputChars[ix].ch === ch;
+        }, this)
+    );
 };
 
 AutoTypeObfuscator.prototype.step = function() {
@@ -106,7 +113,7 @@ AutoTypeObfuscator.prototype.stepReal = function() {
                     break;
                 }
             }
-            possibleActions.push({ ins: true, ch: this.chars[i], ix: i, from: from, to: to });
+            possibleActions.push({ ins: true, ch: this.chars[i], ix: i, from, to });
         }
     }
     const action = possibleActions[Math.floor(Math.random() * possibleActions.length)];
@@ -154,15 +161,15 @@ AutoTypeObfuscator.prototype.moveRight = function() {
 AutoTypeObfuscator.prototype.inputChar = function(ch) {
     logger.debug('inputChar', ch);
     this.ops.push({ type: 'text', value: ch });
-    this.inputChars.splice(this.inputCursor, this.inputSel, { ch: ch });
+    this.inputChars.splice(this.inputCursor, this.inputSel, { ch });
     this.inputCursor++;
     this.inputSel = 0;
 };
 
 AutoTypeObfuscator.prototype.copyPaste = function(ch) {
     logger.debug('copyPaste', ch);
-    this.ops.push({type: 'cmd', value: 'copyPaste', arg: ch});
-    this.inputChars.splice(this.inputCursor, this.inputSel, { ch: ch });
+    this.ops.push({ type: 'cmd', value: 'copyPaste', arg: ch });
+    this.inputChars.splice(this.inputCursor, this.inputSel, { ch });
     this.inputCursor++;
     this.inputSel = 0;
 };
@@ -174,10 +181,10 @@ AutoTypeObfuscator.prototype.selectText = function(backward, count) {
         ops.push({ type: 'key', value: backward ? 'left' : 'right' });
     }
     if (ops.length === 1) {
-        ops[0].mod = {'+': true};
+        ops[0].mod = { '+': true };
         this.ops.push(ops[0]);
     } else {
-        this.ops.push({type: 'group', value: ops, mod: {'+': true}});
+        this.ops.push({ type: 'group', value: ops, mod: { '+': true } });
     }
     if (backward) {
         this.inputCursor -= count;
@@ -199,4 +206,4 @@ AutoTypeObfuscator.prototype.deleteText = function(backward) {
     }
 };
 
-module.exports = AutoTypeObfuscator;
+export { AutoTypeObfuscator };

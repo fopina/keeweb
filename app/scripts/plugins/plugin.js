@@ -1,15 +1,16 @@
-const kdbxweb = require('kdbxweb');
-const Backbone = require('backbone');
-const PluginApi = require('./plugin-api');
-const ThemeVars = require('./theme-vars');
-const Logger = require('../util/logger');
-const SettingsManager = require('../comp/settings-manager');
-const IoCache = require('../storage/io-cache');
-const AppSettingsModel = require('../models/app-settings-model');
-const BaseLocale = require('../locales/base.json');
-const SignatureVerifier = require('../util/signature-verifier');
-const SemVer = require('../util/semver');
-const RuntimeInfo = require('../comp/runtime-info');
+import kdbxweb from 'kdbxweb';
+import BaseLocale from 'locales/base.json';
+import { Model } from 'framework/model';
+import { RuntimeInfo } from 'const/runtime-info';
+import { Launcher } from 'comp/launcher';
+import { SettingsManager } from 'comp/settings/settings-manager';
+import { AppSettingsModel } from 'models/app-settings-model';
+import { PluginApi } from 'plugins/plugin-api';
+import { ThemeVars } from 'plugins/theme-vars';
+import { IoCache } from 'storage/io-cache';
+import { SemVer } from 'util/data/semver';
+import { SignatureVerifier } from 'util/data/signature-verifier';
+import { Logger } from 'util/logger';
 
 const commonLogger = new Logger('plugin');
 const io = new IoCache({
@@ -29,52 +30,44 @@ const PluginStatus = {
     STATUS_ERROR: 'error'
 };
 
-const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
-    idAttribute: 'name',
-
-    defaults: {
-        name: '',
-        manifest: '',
-        url: '',
-        status: '',
-        autoUpdate: false,
-        installTime: null,
-        installError: null,
-        updateCheckDate: null,
-        updateError: null,
-        skipSignatureValidation: false
-    },
-
-    resources: {},
-    module: null,
-
-    initialize(options) {
-        const name = options.manifest.name;
-        this.set({ name });
-        this.logger = new Logger(`plugin:${name}`);
-    },
+class Plugin extends Model {
+    constructor(data) {
+        const name = data.manifest.name;
+        if (!name) {
+            throw new Error('Cannot create a plugin without name');
+        }
+        super({
+            id: name,
+            name,
+            resources: {},
+            logger: new Logger(`plugin:${name}`),
+            ...data
+        });
+    }
 
     install(activate, local) {
         const ts = this.logger.ts();
-        this.set('status', this.STATUS_INSTALLING);
+        this.status = PluginStatus.STATUS_INSTALLING;
         return Promise.resolve().then(() => {
             const error = this.validateManifest();
             if (error) {
                 this.logger.error('Manifest validation error', error);
-                this.set('status', this.STATUS_INVALID);
+                this.status = PluginStatus.STATUS_INVALID;
                 throw 'Plugin validation error: ' + error;
             }
-            this.set('status', this.STATUS_INACTIVE);
+            this.status = PluginStatus.STATUS_INACTIVE;
             if (!activate) {
                 this.logger.info('Loaded inactive plugin');
                 return;
             }
             return this.installWithManifest(local)
-                .then(() => this.set('installTime', this.logger.ts() - ts))
+                .then(() => {
+                    this.installTime = this.logger.ts() - ts;
+                })
                 .catch(err => {
                     this.logger.error('Error installing plugin', err);
                     this.set({
-                        status: this.STATUS_ERROR,
+                        status: PluginStatus.STATUS_ERROR,
                         installError: err,
                         installTime: this.logger.ts() - ts,
                         updateError: null
@@ -82,10 +75,10 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                     throw err;
                 });
         });
-    },
+    }
 
     validateManifest() {
-        const manifest = this.get('manifest');
+        const manifest = this.manifest;
         if (!manifest.name) {
             return 'No plugin name';
         }
@@ -98,7 +91,12 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
         if (manifest.manifestVersion !== '0.1.0') {
             return 'Invalid manifest version ' + manifest.manifestVersion;
         }
-        if (!manifest.author || !manifest.author.email || !manifest.author.name || !manifest.author.url) {
+        if (
+            !manifest.author ||
+            !manifest.author.email ||
+            !manifest.author.name ||
+            !manifest.author.url
+        ) {
             return 'Invalid plugin author';
         }
         if (!manifest.url) {
@@ -107,17 +105,24 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
         if (!manifest.publicKey) {
             return 'No plugin public key';
         }
-        if (!this.get('skipSignatureValidation') && manifest.publicKey !== SignatureVerifier.getPublicKey()) {
+        if (
+            !this.skipSignatureValidation &&
+            !SignatureVerifier.getPublicKeys().includes(manifest.publicKey)
+        ) {
             return 'Public key mismatch';
         }
         if (!manifest.resources || !Object.keys(manifest.resources).length) {
             return 'No plugin resources';
         }
-        if (manifest.resources.loc &&
-            (!manifest.locale || !manifest.locale.title || !/^[a-z]{2}(-[A-Z]{2})?$/.test(manifest.locale.name))) {
+        if (
+            manifest.resources.loc &&
+            (!manifest.locale ||
+                !manifest.locale.title ||
+                !/^[a-z]{2}(-[A-Z]{2})?$/.test(manifest.locale.name))
+        ) {
             return 'Bad plugin locale';
         }
-        if (manifest.desktop && !RuntimeInfo.launcher) {
+        if (manifest.desktop && !Launcher) {
             return 'Desktop plugin';
         }
         if (manifest.versionMin) {
@@ -136,31 +141,42 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 return `Required max app version is ${manifest.versionMax}, actual ${RuntimeInfo.version}`;
             }
         }
-    },
+    }
 
     validateUpdatedManifest(newManifest) {
-        const manifest = this.get('manifest');
+        const manifest = this.manifest;
         if (manifest.name !== newManifest.name) {
             return 'Plugin name mismatch';
         }
         if (manifest.publicKey !== newManifest.publicKey) {
-            return 'Public key mismatch';
+            const wasOfficial = SignatureVerifier.getPublicKeys().includes(manifest.publicKey);
+            const isOfficial = SignatureVerifier.getPublicKeys().includes(newManifest.publicKey);
+            if (!wasOfficial || !isOfficial) {
+                return 'Public key mismatch';
+            }
         }
-    },
+    }
 
     installWithManifest(local) {
-        const manifest = this.get('manifest');
-        this.logger.info('Loading plugin with resources', Object.keys(manifest.resources).join(', '), local ? '(local)' : '(url)');
+        const manifest = this.manifest;
+        this.logger.info(
+            'Loading plugin with resources',
+            Object.keys(manifest.resources).join(', '),
+            local ? '(local)' : '(url)'
+        );
         this.resources = {};
         const ts = this.logger.ts();
-        const results = Object.keys(manifest.resources)
-            .map(res => this.loadResource(res, local));
+        const results = Object.keys(manifest.resources).map(res => this.loadResource(res, local));
         return Promise.all(results)
-            .catch(() => { throw 'Error loading plugin resources'; })
+            .catch(() => {
+                throw 'Error loading plugin resources';
+            })
             .then(() => this.installWithResources())
-            .then(() => local ? undefined : this.saveResources())
-            .then(() => { this.logger.info('Install complete', this.logger.ts(ts)); });
-    },
+            .then(() => (local ? undefined : this.saveResources()))
+            .then(() => {
+                this.logger.info('Install complete', this.logger.ts(ts));
+            });
+    }
 
     getResourcePath(res) {
         switch (res) {
@@ -169,15 +185,15 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
             case 'js':
                 return 'plugin.js';
             case 'loc':
-                return this.get('manifest').locale.name + '.json';
+                return this.manifest.locale.name + '.json';
             default:
                 throw `Unknown resource ${res}`;
         }
-    },
+    }
 
     getStorageResourcePath(res) {
         return this.id + '_' + this.getResourcePath(res);
-    },
+    }
 
     loadResource(type, local) {
         const ts = this.logger.ts();
@@ -185,10 +201,10 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
         if (local) {
             res = new Promise((resolve, reject) => {
                 const storageKey = this.getStorageResourcePath(type);
-                io.load(storageKey, (err, data) => err ? reject(err) : resolve(data));
+                io.load(storageKey, (err, data) => (err ? reject(err) : resolve(data)));
             });
         } else {
-            const url = this.get('url');
+            const url = this.url;
             res = httpGet(url + this.getResourcePath(type), true);
         }
         return res.then(data => {
@@ -197,11 +213,11 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 this.resources[type] = data;
             });
         });
-    },
+    }
 
     verifyResource(data, type) {
         const ts = this.logger.ts();
-        const manifest = this.get('manifest');
+        const manifest = this.manifest;
         const signature = manifest.resources[type];
         return SignatureVerifier.verify(data, signature, manifest.publicKey)
             .then(valid => {
@@ -217,11 +233,11 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 this.logger.error('Error validating resource signature', type);
                 throw `Error validating resource signature for ${type}`;
             });
-    },
+    }
 
     installWithResources() {
         this.logger.info('Installing plugin resources');
-        const manifest = this.get('manifest');
+        const manifest = this.manifest;
         const promises = [];
         if (this.resources.css) {
             promises.push(this.applyCss(manifest.name, this.resources.css, manifest.theme));
@@ -234,26 +250,29 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
         }
         return Promise.all(promises)
             .then(() => {
-                this.set('status', this.STATUS_ACTIVE);
+                this.status = PluginStatus.STATUS_ACTIVE;
             })
             .catch(e => {
                 this.logger.info('Install error', e);
-                this.set('status', this.STATUS_ERROR);
-                return this.disable().then(() => { throw e; });
+                this.status = PluginStatus.STATUS_ERROR;
+                return this.disable().then(() => {
+                    throw e;
+                });
             });
-    },
+    }
 
     saveResources() {
         const resourceSavePromises = [];
         for (const key of Object.keys(this.resources)) {
             resourceSavePromises.push(this.saveResource(key, this.resources[key]));
         }
-        return Promise.all(resourceSavePromises)
-            .catch(e => {
-                this.logger.debug('Error saving plugin resources', e);
-                return this.uninstall().then(() => { throw 'Error saving plugin resources'; });
+        return Promise.all(resourceSavePromises).catch(e => {
+            this.logger.debug('Error saving plugin resources', e);
+            return this.uninstall().then(() => {
+                throw 'Error saving plugin resources';
             });
-    },
+        });
+    }
 
     saveResource(key, value) {
         return new Promise((resolve, reject) => {
@@ -266,7 +285,7 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 }
             });
         });
-    },
+    }
 
     deleteResources() {
         const resourceDeletePromises = [];
@@ -274,34 +293,47 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
             resourceDeletePromises.push(this.deleteResource(key));
         }
         return Promise.all(resourceDeletePromises);
-    },
+    }
 
     deleteResource(key) {
         return new Promise(resolve => {
             const storageKey = this.getStorageResourcePath(key);
             io.remove(storageKey, () => resolve());
         });
-    },
+    }
 
     applyCss(name, data, theme) {
-        return Promise.resolve().then(() => {
-            const text = kdbxweb.ByteUtils.bytesToString(data);
-            const id = 'plugin-css-' + name;
-            this.createElementInHead('style', id, 'text/css', text);
-            if (theme) {
-                const locKey = this.getThemeLocaleKey(theme.name);
-                SettingsManager.allThemes[theme.name] = locKey;
-                BaseLocale[locKey] = theme.title;
-                for (const styleSheet of Array.from(document.styleSheets)) {
-                    if (styleSheet.ownerNode.id === id) {
-                        this.processThemeStyleSheet(styleSheet, theme);
-                        break;
+        return new Promise((resolve, reject) => {
+            try {
+                const blob = new Blob([data], { type: 'text/css' });
+                const objectUrl = URL.createObjectURL(blob);
+                const id = 'plugin-css-' + name;
+                const el = this.createElementInHead('link', id, {
+                    rel: 'stylesheet',
+                    href: objectUrl
+                });
+                el.addEventListener('load', () => {
+                    URL.revokeObjectURL(objectUrl);
+                    if (theme) {
+                        const locKey = this.getThemeLocaleKey(theme.name);
+                        SettingsManager.allThemes[theme.name] = locKey;
+                        BaseLocale[locKey] = theme.title;
+                        for (const styleSheet of Array.from(document.styleSheets)) {
+                            if (styleSheet.ownerNode.id === id) {
+                                this.processThemeStyleSheet(styleSheet, theme);
+                                break;
+                            }
+                        }
                     }
-                }
+                    this.logger.debug('Plugin style installed');
+                    resolve();
+                });
+            } catch (e) {
+                this.logger.error('Error installing plugin style', e);
+                reject(e);
             }
-            this.logger.debug('Plugin style installed');
         });
-    },
+    }
 
     processThemeStyleSheet(styleSheet, theme) {
         const themeSelector = '.th-' + theme.name;
@@ -315,19 +347,22 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
             }
         }
         if (badSelectors.length) {
-            this.logger.error('Themes must not add rules outside theme namespace. Bad selectors:', badSelectors);
+            this.logger.error(
+                'Themes must not add rules outside theme namespace. Bad selectors:',
+                badSelectors
+            );
             throw 'Invalid theme';
         }
-    },
+    }
 
     addThemeVariables(rule) {
         ThemeVars.apply(rule.style);
-    },
+    }
 
     applyJs(name, data) {
         return Promise.resolve().then(() => {
             let text = kdbxweb.ByteUtils.bytesToString(data);
-            this.module = {exports: {}};
+            this.module = { exports: {} };
             const id = 'plugin-' + Date.now().toString() + Math.random().toString();
             global[id] = {
                 require: PluginApi.require,
@@ -335,7 +370,8 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
             };
             text = `(function(require, module){${text}})(window["${id}"].require,window["${id}"].module);`;
             const ts = this.logger.ts();
-            this.createElementInHead('script', 'plugin-js-' + name, 'text/javascript', text);
+            // eslint-disable-next-line no-eval
+            eval(text);
             return new Promise((resolve, reject) => {
                 setTimeout(() => {
                     delete global[id];
@@ -349,26 +385,28 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 }, 0);
             });
         });
-    },
+    }
 
-    createElementInHead(tagName, id, type, text) {
+    createElementInHead(tagName, id, attrs) {
         let el = document.getElementById(id);
         if (el) {
             el.parentNode.removeChild(el);
         }
         el = document.createElement(tagName);
-        el.appendChild(document.createTextNode(text));
         el.setAttribute('id', id);
-        el.setAttribute('type', type);
+        for (const [name, value] of Object.entries(attrs)) {
+            el.setAttribute(name, value);
+        }
         document.head.appendChild(el);
-    },
+        return el;
+    }
 
     removeElement(id) {
         const el = document.getElementById(id);
         if (el) {
             el.parentNode.removeChild(el);
         }
-    },
+    }
 
     applyLoc(locale, data) {
         return Promise.resolve().then(() => {
@@ -378,27 +416,27 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
             SettingsManager.customLocales[locale.name] = localeData;
             this.logger.debug('Plugin locale installed');
         });
-    },
+    }
 
     removeLoc(locale) {
         delete SettingsManager.allLocales[locale.name];
         delete SettingsManager.customLocales[locale.name];
         if (SettingsManager.activeLocale === locale.name) {
-            AppSettingsModel.instance.set('locale', 'en');
+            AppSettingsModel.locale = 'en';
         }
-    },
+    }
 
     getThemeLocaleKey(name) {
         return `setGenThemeCustom_${name}`;
-    },
+    }
 
     removeTheme(theme) {
         delete SettingsManager.allThemes[theme.name];
-        if (AppSettingsModel.instance.get('theme') === theme.name) {
-            AppSettingsModel.instance.set('theme', 'fb');
+        if (AppSettingsModel.theme === theme.name) {
+            AppSettingsModel.theme = 'fb';
         }
         delete BaseLocale[this.getThemeLocaleKey(theme.name)];
-    },
+    }
 
     loadPluginSettings() {
         if (!this.module || !this.module.exports || !this.module.exports.setSettings) {
@@ -407,90 +445,108 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
         const ts = this.logger.ts();
         const settingPrefix = this.getSettingPrefix();
         let settings = null;
-        for (const key of Object.keys(AppSettingsModel.instance.attributes)) {
+        for (const key of Object.keys(AppSettingsModel)) {
             if (key.lastIndexOf(settingPrefix, 0) === 0) {
                 if (!settings) {
                     settings = {};
                 }
-                settings[key.replace(settingPrefix, '')] = AppSettingsModel.instance.attributes[key];
+                settings[key.replace(settingPrefix, '')] = AppSettingsModel[key];
             }
         }
         if (settings) {
             this.setSettings(settings);
         }
         this.logger.debug('Plugin settings loaded', this.logger.ts(ts));
-    },
+    }
 
     uninstallPluginCode() {
-        if (this.get('manifest').resources.js && this.module && this.module.exports && this.module.exports.uninstall) {
+        if (
+            this.manifest.resources.js &&
+            this.module &&
+            this.module.exports &&
+            this.module.exports.uninstall
+        ) {
             try {
                 this.module.exports.uninstall();
             } catch (e) {
                 this.logger.error('Plugin uninstall method returned an error', e);
             }
         }
-    },
+    }
 
     uninstall() {
         const ts = this.logger.ts();
         return this.disable().then(() => {
             return this.deleteResources().then(() => {
-                this.set('status', '');
+                this.status = '';
                 this.logger.info('Uninstall complete', this.logger.ts(ts));
             });
         });
-    },
+    }
 
     disable() {
-        const manifest = this.get('manifest');
-        this.logger.info('Disabling plugin with resources', Object.keys(manifest.resources).join(', '));
-        this.set('status', this.STATUS_UNINSTALLING);
+        const manifest = this.manifest;
+        this.logger.info(
+            'Disabling plugin with resources',
+            Object.keys(manifest.resources).join(', ')
+        );
+        this.status = PluginStatus.STATUS_UNINSTALLING;
         const ts = this.logger.ts();
         return Promise.resolve().then(() => {
             if (manifest.resources.css) {
-                this.removeElement('plugin-css-' + this.get('name'));
+                this.removeElement('plugin-css-' + this.name);
             }
             if (manifest.resources.js) {
                 this.uninstallPluginCode();
-                this.removeElement('plugin-js-' + this.get('name'));
             }
             if (manifest.resources.loc) {
-                this.removeLoc(this.get('manifest').locale);
+                this.removeLoc(this.manifest.locale);
             }
             if (manifest.theme) {
                 this.removeTheme(manifest.theme);
             }
-            this.set('status', this.STATUS_INACTIVE);
+            this.status = PluginStatus.STATUS_INACTIVE;
             this.logger.info('Disable complete', this.logger.ts(ts));
         });
-    },
+    }
 
     update(newPlugin) {
         const ts = this.logger.ts();
-        const prevStatus = this.get('status');
-        this.set('status', this.STATUS_UPDATING);
+        const prevStatus = this.status;
+        this.status = PluginStatus.STATUS_UPDATING;
         return Promise.resolve().then(() => {
-            const manifest = this.get('manifest');
-            const newManifest = newPlugin.get('manifest');
+            const manifest = this.manifest;
+            const newManifest = newPlugin.manifest;
             if (manifest.version === newManifest.version) {
-                this.set({ status: prevStatus, updateCheckDate: Date.now(), updateError: null });
+                this.set({
+                    status: prevStatus,
+                    updateCheckDate: Date.now(),
+                    updateError: null
+                });
                 this.logger.info(`v${manifest.version} is the latest plugin version`);
                 return;
             }
-            this.logger.info(`Updating plugin from v${manifest.version} to v${newManifest.version}`);
+            this.logger.info(
+                `Updating plugin from v${manifest.version} to v${newManifest.version}`
+            );
             const error = newPlugin.validateManifest() || this.validateUpdatedManifest(newManifest);
             if (error) {
                 this.logger.error('Manifest validation error', error);
-                this.set({ status: prevStatus, updateCheckDate: Date.now(), updateError: error });
+                this.set({
+                    status: prevStatus,
+                    updateCheckDate: Date.now(),
+                    updateError: error
+                });
                 throw 'Plugin validation error: ' + error;
             }
             this.uninstallPluginCode();
-            return newPlugin.installWithManifest(false)
+            return newPlugin
+                .installWithManifest(false)
                 .then(() => {
                     this.module = newPlugin.module;
                     this.resources = newPlugin.resources;
                     this.set({
-                        status: this.STATUS_ACTIVE,
+                        status: PluginStatus.STATUS_ACTIVE,
                         manifest: newManifest,
                         installTime: this.logger.ts() - ts,
                         installError: null,
@@ -501,38 +557,46 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 })
                 .catch(err => {
                     this.logger.error('Error updating plugin', err);
-                    if (prevStatus === this.STATUS_ACTIVE) {
+                    if (prevStatus === PluginStatus.STATUS_ACTIVE) {
                         this.logger.info('Activating previous version');
-                        return this.installWithResources()
-                            .then(() => {
-                                this.set({ updateCheckDate: Date.now(), updateError: err });
-                                throw err;
-                            });
+                        return this.installWithResources().then(() => {
+                            this.set({ updateCheckDate: Date.now(), updateError: err });
+                            throw err;
+                        });
                     } else {
-                        this.set({ status: prevStatus, updateCheckDate: Date.now(), updateError: err });
+                        this.set({
+                            status: prevStatus,
+                            updateCheckDate: Date.now(),
+                            updateError: err
+                        });
                         throw err;
                     }
                 });
         });
-    },
+    }
 
     setAutoUpdate(enabled) {
-        this.set('autoUpdate', !!enabled);
-    },
+        this.autoUpdate = !!enabled;
+    }
 
     getSettingPrefix() {
         return `plugin:${this.id}:`;
-    },
+    }
 
     getSettings() {
-        if (this.get('status') === PluginStatus.STATUS_ACTIVE && this.module && this.module.exports && this.module.exports.getSettings) {
+        if (
+            this.status === PluginStatus.STATUS_ACTIVE &&
+            this.module &&
+            this.module.exports &&
+            this.module.exports.getSettings
+        ) {
             try {
                 const settings = this.module.exports.getSettings();
                 const settingsPrefix = this.getSettingPrefix();
                 if (settings instanceof Array) {
                     return settings.map(setting => {
-                        setting = _.clone(setting);
-                        const value = AppSettingsModel.instance.get(settingsPrefix + setting.name);
+                        setting = { ...setting };
+                        const value = AppSettingsModel[settingsPrefix + setting.name];
                         if (value !== undefined) {
                             setting.value = value;
                         }
@@ -544,12 +608,11 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
                 this.logger.error('getSettings error', e);
             }
         }
-    },
+    }
 
     setSettings(settings) {
         for (const key of Object.keys(settings)) {
-            const value = settings[key];
-            AppSettingsModel.instance.set(this.getSettingPrefix() + key, value);
+            AppSettingsModel[this.getSettingPrefix() + key] = settings[key];
         }
         if (this.module.exports.setSettings) {
             try {
@@ -559,42 +622,60 @@ const Plugin = Backbone.Model.extend(_.extend({}, PluginStatus, {
             }
         }
     }
-}));
 
-_.extend(Plugin, PluginStatus);
-
-Plugin.loadFromUrl = function(url, expectedManifest) {
-    if (url[url.length - 1] !== '/') {
-        url += '/';
-    }
-    commonLogger.info('Installing plugin from url', url);
-    const manifestUrl = url + 'manifest.json';
-    return httpGet(manifestUrl)
-        .catch(e => {
-            commonLogger.error('Error loading plugin manifest', e);
-            throw 'Error loading plugin manifest';
-        })
-        .then(manifest => {
-            try {
-                manifest = JSON.parse(manifest);
-            } catch (e) {
-                commonLogger.error('Failed to parse manifest', manifest);
-                throw 'Failed to parse manifest';
-            }
-            commonLogger.debug('Loaded manifest', manifest);
-            if (expectedManifest) {
-                if (expectedManifest.name !== manifest.name) {
-                    throw 'Bad plugin name';
+    static loadFromUrl(url, expectedManifest) {
+        if (url[url.length - 1] !== '/') {
+            url += '/';
+        }
+        commonLogger.info('Installing plugin from url', url);
+        const manifestUrl = url + 'manifest.json';
+        return httpGet(manifestUrl)
+            .catch(e => {
+                commonLogger.error('Error loading plugin manifest', e);
+                throw 'Error loading plugin manifest';
+            })
+            .then(manifest => {
+                try {
+                    manifest = JSON.parse(manifest);
+                } catch (e) {
+                    commonLogger.error('Failed to parse manifest', manifest);
+                    throw 'Failed to parse manifest';
                 }
-                if (expectedManifest.privateKey !== manifest.privateKey) {
-                    throw 'Bad plugin private key';
+                commonLogger.debug('Loaded manifest', manifest);
+                if (expectedManifest) {
+                    if (expectedManifest.name !== manifest.name) {
+                        throw 'Bad plugin name';
+                    }
+                    if (expectedManifest.privateKey !== manifest.privateKey) {
+                        throw 'Bad plugin private key';
+                    }
                 }
-            }
-            return new Plugin({
-                manifest, url
+                return new Plugin({
+                    manifest,
+                    url
+                });
             });
-        });
-};
+    }
+}
+
+Plugin.defineModelProperties({
+    id: '',
+    name: '',
+    logger: null,
+    manifest: '',
+    url: '',
+    status: '',
+    autoUpdate: false,
+    installTime: null,
+    installError: null,
+    updateCheckDate: null,
+    updateError: null,
+    skipSignatureValidation: false,
+    resources: null,
+    module: null
+});
+
+Object.assign(Plugin, PluginStatus);
 
 function httpGet(url, binary) {
     url += '?ts=' + Date.now();
@@ -631,4 +712,4 @@ function httpGet(url, binary) {
     });
 }
 
-module.exports = Plugin;
+export { Plugin, PluginStatus };

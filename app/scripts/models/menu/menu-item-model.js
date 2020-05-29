@@ -1,70 +1,63 @@
-const Backbone = require('backbone');
-const MenuOptionCollection = require('../../collections/menu/menu-option-collection');
-let ItemCollection;
+import { Model } from 'framework/model';
+import { MenuOptionCollection } from 'collections/menu/menu-option-collection';
+import { MenuOptionModel } from 'models/menu/menu-option-model';
 
-const MenuItemModel = Backbone.Model.extend({
-    defaults: {
-        title: '',
-        icon: '',
-        customIcon: null,
-        active: false,
-        expanded: true,
-        items: null,
-        shortcut: null,
-        options: null,
-        cls: null,
-        disabled: false,
-        visible: true,
-        drag: false,
-        drop: false,
-        filterKey: null,
-        filterValue: null,
-        collapsible: false
-    },
-
-    initialize: function(model) {
+class MenuItemModel extends Model {
+    constructor(model) {
+        super(model);
         if (model && model.file) {
-            this.listenTo(model.file, 'change:name', this.changeTitle, this);
+            model.file.on('change:name', this.changeTitle.bind(this));
         }
-    },
+    }
 
-    _loadItemCollectionType: function() {
-        return require('../../collections/menu/menu-item-collection');
-    },
+    addItem(item) {
+        this.items.push(item);
+    }
 
-    addItem: function(item) {
-        if (!ItemCollection) {
-            ItemCollection = this._loadItemCollectionType();
+    addOption(option) {
+        if (!this.options) {
+            this.options = new MenuOptionCollection();
         }
-        let items = this.get('items');
-        if (!items) {
-            items = new ItemCollection();
-            this.set('items', items);
-        }
-        items.add(item);
-    },
+        this.options.push(new MenuOptionModel(option));
+    }
 
-    addOption: function(option) {
-        let options = this.get('options');
-        if (!options) {
-            options = new MenuOptionCollection();
-            this.set('options', options);
-        }
-        options.add(option);
-    },
-
-    toggleExpanded: function() {
-        const items = this.get('items');
-        let expanded = !this.get('expanded');
+    toggleExpanded() {
+        const items = this.items;
+        let expanded = !this.expanded;
         if (!items || !items.length) {
             expanded = true;
         }
-        this.set('expanded', expanded);
-    },
-
-    changeTitle: function(model, newTitle) {
-        this.set('title', newTitle);
+        this.expanded = expanded;
     }
+
+    changeTitle(model, newTitle) {
+        this.title = newTitle;
+    }
+}
+
+MenuItemModel.defineModelProperties({
+    id: '',
+    title: '',
+    locTitle: '',
+    icon: '',
+    customIcon: null,
+    active: false,
+    expanded: true,
+    items: null,
+    shortcut: null,
+    options: null,
+    cls: null,
+    disabled: false,
+    visible: true,
+    drag: false,
+    drop: false,
+    filterKey: null,
+    filterValue: null,
+    collapsible: false,
+    defaultItem: false,
+    page: null,
+    editable: false,
+    file: null
 });
 
-module.exports = MenuItemModel;
+export { MenuItemModel };

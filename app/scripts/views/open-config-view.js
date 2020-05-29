@@ -1,51 +1,51 @@
-const Backbone = require('backbone');
-const Locale = require('../util/locale');
-const Keys = require('../const/keys');
+import { View } from 'framework/views/view';
+import { Keys } from 'const/keys';
+import { Locale } from 'util/locale';
+import template from 'templates/open-config.hbs';
 
-const OpenConfigView = Backbone.View.extend({
-    template: require('templates/open-config.hbs'),
+class OpenConfigView extends View {
+    template = template;
 
-    events: {
+    events = {
         'click .open__config-btn-cancel': 'cancel',
         'click .open__config-btn-ok': 'apply',
         'input input': 'changeInput',
         'keyup input': 'keyup'
-    },
+    };
 
-    render: function() {
-        this.renderTemplate(this.model);
+    render() {
+        super.render(this.model);
         this.$el.find(':input:first').focus();
         this.checkValidity();
-        return this;
-    },
+    }
 
-    cancel: function() {
-        this.trigger('cancel');
-    },
+    cancel() {
+        this.emit('cancel');
+    }
 
-    apply: function() {
+    apply() {
         const data = this.getData();
         if (data) {
-            this.trigger('apply', data);
+            this.emit('apply', data);
         }
-    },
+    }
 
-    changeInput: function() {
+    changeInput() {
         this.checkValidity();
-    },
+    }
 
-    keyup: function(e) {
+    keyup(e) {
         if (e.which === Keys.DOM_VK_RETURN) {
             this.apply();
         }
-    },
+    }
 
-    checkValidity: function() {
+    checkValidity() {
         const isValid = this.getData();
         this.$el.find('.open__config-btn-ok').prop('disabled', !isValid);
-    },
+    }
 
-    getData: function() {
+    getData() {
         let data = { storage: this.model.id };
         this.model.fields.every(function(field) {
             const input = this.$el.find('#open__config-field-' + field.id)[0];
@@ -58,21 +58,24 @@ const OpenConfigView = Backbone.View.extend({
             return true;
         }, this);
         return data;
-    },
+    }
 
-    setDisabled: function(disabled) {
+    setDisabled(disabled) {
         disabled = !!disabled;
         this.$el.find(':input:not(.open__config-btn-cancel)').prop('disabled', disabled);
         this.$el.toggleClass('open__config--disabled', disabled);
         if (disabled) {
             this.$el.find('.open__config-error').text('');
         }
-    },
+    }
 
-    setError: function(err) {
-        const errText = err && err.notFound ? Locale.openConfigErrorNotFound : Locale.openConfigError.replace('{}', err);
+    setError(err) {
+        const errText =
+            err && err.notFound
+                ? Locale.openConfigErrorNotFound
+                : Locale.openConfigError.replace('{}', err);
         this.$el.find('.open__config-error').text(errText);
     }
-});
+}
 
-module.exports = OpenConfigView;
+export { OpenConfigView };

@@ -1,37 +1,60 @@
-const Backbone = require('backbone');
-const MenuSectionCollection = require('../../collections/menu/menu-section-collection');
-const MenuSectionModel = require('./menu-section-model');
-const GroupsMenuModel = require('./groups-menu-model');
-const Locale = require('../../util/locale');
-const Format = require('../../util/format');
-const Keys = require('../../const/keys');
-const Colors = require('../../const/colors');
+import { Model } from 'framework/model';
+import { Events } from 'framework/events';
+import { MenuSectionCollection } from 'collections/menu/menu-section-collection';
+import { Colors } from 'const/colors';
+import { Keys } from 'const/keys';
+import { GroupsMenuModel } from 'models/menu/groups-menu-model';
+import { MenuSectionModel } from 'models/menu/menu-section-model';
+import { StringFormat } from 'util/formatting/string-format';
+import { Locale } from 'util/locale';
 
-const MenuModel = Backbone.Model.extend({
-    defaults: {
-        sections: null
-    },
-
-    menus: null,
-
-    initialize: function() {
+class MenuModel extends Model {
+    constructor() {
+        super();
         this.menus = {};
-        this.allItemsSection = new MenuSectionModel([{ locTitle: 'menuAllItems', icon: 'th-large', active: true,
-            shortcut: Keys.DOM_VK_A, filterKey: '*' }]);
-        this.allItemsItem = this.allItemsSection.get('items').models[0];
+        this.allItemsSection = new MenuSectionModel([
+            {
+                locTitle: 'menuAllItems',
+                icon: 'th-large',
+                active: true,
+                shortcut: Keys.DOM_VK_A,
+                filterKey: '*'
+            }
+        ]);
+        this.allItemsItem = this.allItemsSection.items[0];
         this.groupsSection = new GroupsMenuModel();
-        this.colorsSection = new MenuSectionModel([{ locTitle: 'menuColors', icon: 'bookmark', shortcut: Keys.DOM_VK_C,
-            cls: 'menu__item-colors', filterKey: 'color', filterValue: true }]);
-        this.colorsItem = this.colorsSection.get('items').models[0];
+        this.colorsSection = new MenuSectionModel([
+            {
+                locTitle: 'menuColors',
+                icon: 'bookmark',
+                shortcut: Keys.DOM_VK_C,
+                cls: 'menu__item-colors',
+                filterKey: 'color',
+                filterValue: true
+            }
+        ]);
+        this.colorsItem = this.colorsSection.items[0];
         const defTags = [this._getDefaultTagItem()];
         this.tagsSection = new MenuSectionModel(defTags);
         this.tagsSection.set({ scrollable: true, drag: true });
         this.tagsSection.defaultItems = defTags;
-        this.trashSection = new MenuSectionModel([{ locTitle: 'menuTrash', icon: 'trash', shortcut: Keys.DOM_VK_D,
-            filterKey: 'trash', filterValue: true, drop: true }]);
+        this.trashSection = new MenuSectionModel([
+            {
+                locTitle: 'menuTrash',
+                icon: 'trash',
+                shortcut: Keys.DOM_VK_D,
+                filterKey: 'trash',
+                filterValue: true,
+                drop: true
+            }
+        ]);
         Colors.AllColors.forEach(color => {
-            this.colorsSection.get('items').models[0]
-                .addOption({ cls: 'fa ' + color + '-color', value: color, filterValue: color });
+            const option = {
+                cls: 'fa ' + color + '-color',
+                value: color,
+                filterValue: color
+            };
+            this.colorsSection.items[0].addOption(option);
         });
         this.menus.app = new MenuSectionCollection([
             this.allItemsSection,
@@ -41,11 +64,21 @@ const MenuModel = Backbone.Model.extend({
             this.trashSection
         ]);
 
-        this.generalSection = new MenuSectionModel([{ locTitle: 'menuSetGeneral', icon: 'cog', page: 'general', active: true }]);
-        this.shortcutsSection = new MenuSectionModel([{ locTitle: 'shortcuts', icon: 'keyboard-o', page: 'shortcuts' }]);
-        this.pluginsSection = new MenuSectionModel([{ locTitle: 'plugins', icon: 'puzzle-piece', page: 'plugins' }]);
-        this.aboutSection = new MenuSectionModel([{ locTitle: 'menuSetAbout', icon: 'info', page: 'about' }]);
-        this.helpSection = new MenuSectionModel([{ locTitle: 'help', icon: 'question', page: 'help' }]);
+        this.generalSection = new MenuSectionModel([
+            { locTitle: 'menuSetGeneral', icon: 'cog', page: 'general', active: true }
+        ]);
+        this.shortcutsSection = new MenuSectionModel([
+            { locTitle: 'shortcuts', icon: 'keyboard-o', page: 'shortcuts' }
+        ]);
+        this.pluginsSection = new MenuSectionModel([
+            { locTitle: 'plugins', icon: 'puzzle-piece', page: 'plugins' }
+        ]);
+        this.aboutSection = new MenuSectionModel([
+            { locTitle: 'menuSetAbout', icon: 'info', page: 'about' }
+        ]);
+        this.helpSection = new MenuSectionModel([
+            { locTitle: 'help', icon: 'question', page: 'help' }
+        ]);
         this.filesSection = new MenuSectionModel();
         this.filesSection.set({ scrollable: true, grow: true });
         this.menus.settings = new MenuSectionCollection([
@@ -56,46 +89,55 @@ const MenuModel = Backbone.Model.extend({
             this.helpSection,
             this.filesSection
         ]);
-        this.set('sections', this.menus.app);
+        this.sections = this.menus.app;
 
-        this.listenTo(Backbone, 'set-locale', this._setLocale);
-        this.listenTo(Backbone, 'select-next-menu-item', this._selectNext);
-        this.listenTo(Backbone, 'select-previous-menu-item', this._selectPrevious);
+        Events.on('set-locale', this._setLocale.bind(this));
+        Events.on('select-next-menu-item', this._selectNext.bind(this));
+        Events.on('select-previous-menu-item', this._selectPrevious.bind(this));
+
         this._setLocale();
-    },
+    }
 
-    select: function(sel) {
-        const sections = this.get('sections');
-        sections.forEach(function(section) { this._select(section, sel.item); }, this);
+    select(sel) {
+        const sections = this.sections;
+        for (const section of sections) {
+            this._select(section, sel.item);
+        }
         if (sections === this.menus.app) {
-            this.colorsItem.get('options').forEach(opt => opt.set('active', opt === sel.option));
-            const selColor = sel.item === this.colorsItem && sel.option ? sel.option.get('value') + '-color' : '';
-            this.colorsItem.set('cls', 'menu__item-colors ' + selColor);
-            const filterKey = sel.item.get('filterKey');
-            const filterValue = (sel.option || sel.item).get('filterValue');
+            this.colorsItem.options.forEach(opt => {
+                opt.active = opt === sel.option;
+            });
+            const selColor =
+                sel.item === this.colorsItem && sel.option ? sel.option.value + '-color' : '';
+            this.colorsItem.cls = 'menu__item-colors ' + selColor;
+            const filterKey = sel.item.filterKey;
+            const filterValue = (sel.option || sel.item).filterValue;
             const filter = {};
             filter[filterKey] = filterValue;
-            Backbone.trigger('set-filter', filter);
+            Events.emit('set-filter', filter);
         } else if (sections === this.menus.settings) {
-            Backbone.trigger('set-page', { page: sel.item.get('page'), file: sel.item.get('file') });
+            Events.emit('set-page', {
+                page: sel.item.page,
+                file: sel.item.file
+            });
         }
-    },
+    }
 
-    _selectPrevious: function() {
+    _selectPrevious() {
         let previousItem = null;
 
         const processSection = section => {
-            if (section.has('visible') && !section.get('visible')) {
+            if (section.visible === false) {
                 return true;
             }
-            if (section.has('active')) {
+            if (section.active) {
                 previousItem = section;
             }
-            const items = section.get('items');
+            const items = section.items;
             if (items) {
                 items.forEach(it => {
-                    if (it.get('active') && previousItem) {
-                        this.select({item: previousItem});
+                    if (it.active && previousItem) {
+                        this.select({ item: previousItem });
                         return false;
                     }
                     return processSection(it);
@@ -103,26 +145,26 @@ const MenuModel = Backbone.Model.extend({
             }
         };
 
-        const sections = this.get('sections');
+        const sections = this.sections;
         sections.forEach(section => processSection(section));
-    },
+    }
 
-    _selectNext: function() {
+    _selectNext() {
         let activeItem = null;
 
         const processSection = section => {
-            if (section.has('visible') && !section.get('visible')) {
+            if (section.visible === false) {
                 return true;
             }
-            if (section.has('active') && activeItem && (section !== activeItem)) {
-                this.select({item: section});
+            if (section.active && activeItem && section !== activeItem) {
+                this.select({ item: section });
                 activeItem = null;
                 return false;
             }
-            const items = section.get('items');
+            const items = section.items;
             if (items) {
                 items.forEach(it => {
-                    if (it.get('active')) {
+                    if (it.active) {
                         activeItem = it;
                     }
                     return processSection(it);
@@ -130,39 +172,57 @@ const MenuModel = Backbone.Model.extend({
             }
         };
 
-        const sections = this.get('sections');
+        const sections = this.sections;
         sections.forEach(section => processSection(section));
-    },
-
-    _select: function(item, selectedItem) {
-        const items = item.get('items');
-        if (items) {
-            items.forEach(function(it) {
-                it.set('active', it === selectedItem);
-                this._select(it, selectedItem);
-            }, this);
-        }
-    },
-
-    _setLocale: function() {
-        [this.menus.app, this.menus.settings].forEach(menu => {
-            menu.each(section => section.get('items').each(item => {
-                if (item.get('locTitle')) {
-                    item.set('title', Format.capFirst(Locale[item.get('locTitle')]));
-                }
-            }));
-        });
-        this.tagsSection.defaultItems[0] = this._getDefaultTagItem();
-    },
-
-    _getDefaultTagItem: function() {
-        return { title: Format.capFirst(Locale.tags), icon: 'tags', defaultItem: true,
-            disabled: { header: Locale.menuAlertNoTags, body: Locale.menuAlertNoTagsBody, icon: 'tags' } };
-    },
-
-    setMenu: function(type) {
-        this.set('sections', this.menus[type]);
     }
-});
 
-module.exports = MenuModel;
+    _select(item, selectedItem) {
+        const items = item.items;
+        if (items) {
+            for (const it of items) {
+                it.active = it === selectedItem;
+                this._select(it, selectedItem);
+            }
+        }
+    }
+
+    _setLocale() {
+        for (const menu of [this.menus.app, this.menus.settings]) {
+            for (const section of menu) {
+                for (const item of section.items) {
+                    if (item.locTitle) {
+                        item.title = StringFormat.capFirst(Locale[item.locTitle]);
+                    }
+                }
+            }
+        }
+        this.tagsSection.defaultItems[0] = this._getDefaultTagItem();
+    }
+
+    _getDefaultTagItem() {
+        return {
+            title: StringFormat.capFirst(Locale.tags),
+            icon: 'tags',
+            defaultItem: true,
+            disabled: {
+                header: Locale.menuAlertNoTags,
+                body: Locale.menuAlertNoTagsBody,
+                icon: 'tags'
+            }
+        };
+    }
+
+    setMenu(type) {
+        this.sections = this.menus[type];
+    }
+}
+
+MenuModel.defineModelProperties(
+    {
+        sections: null,
+        menu: null
+    },
+    { extensions: true }
+);
+
+export { MenuModel };

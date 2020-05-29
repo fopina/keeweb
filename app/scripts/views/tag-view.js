@@ -1,66 +1,68 @@
-const Backbone = require('backbone');
-const Locale = require('../util/locale');
-const Alerts = require('../comp/alerts');
+import { Events } from 'framework/events';
+import { View } from 'framework/views/view';
+import { Alerts } from 'comp/ui/alerts';
+import { Locale } from 'util/locale';
+import template from 'templates/tag.hbs';
 
-const TagView = Backbone.View.extend({
-    template: require('templates/tag.hbs'),
+class TagView extends View {
+    parent = '.app__panel';
 
-    events: {
+    template = template;
+
+    events = {
         'click .tag__buttons-trash': 'moveToTrash',
         'click .back-button': 'returnToApp',
         'click .tag__btn-rename': 'renameTag'
-    },
+    };
 
-    initialize: function() {
-        this.appModel = this.model;
-    },
-
-    render: function() {
-        if (this.model) {
-            this.renderTemplate({
-                title: this.model.get('title')
-            }, true);
+    render() {
+        if (this.tag) {
+            super.render({
+                title: this.tag.title
+            });
         }
-        return this;
-    },
+    }
 
-    showTag: function(tag) {
-        this.model = tag;
+    showTag(tag) {
+        this.tag = tag;
         this.render();
-    },
+    }
 
-    renameTag: function() {
+    renameTag() {
         const title = $.trim(this.$el.find('#tag__field-title').val());
-        if (!title || title === this.model.get('title')) {
+        if (!title || title === this.tag.title) {
             return;
         }
         if (/[;,:]/.test(title)) {
-            Alerts.error({ header: Locale.tagBadName, body: Locale.tagBadNameBody.replace('{}', '`,`, `;`, `:`') });
+            Alerts.error({
+                header: Locale.tagBadName,
+                body: Locale.tagBadNameBody.replace('{}', '`,`, `;`, `:`')
+            });
             return;
         }
-        if (this.appModel.tags.some(t => t.toLowerCase() === title.toLowerCase())) {
+        if (this.model.tags.some(t => t.toLowerCase() === title.toLowerCase())) {
             Alerts.error({ header: Locale.tagExists, body: Locale.tagExistsBody });
             return;
         }
-        this.appModel.renameTag(this.model.get('title'), title);
-        Backbone.trigger('select-all');
-    },
+        this.model.renameTag(this.tag.title, title);
+        Events.emit('select-all');
+    }
 
-    moveToTrash: function() {
+    moveToTrash() {
         this.title = null;
         Alerts.yesno({
             header: Locale.tagTrashQuestion,
             body: Locale.tagTrashQuestionBody,
             success: () => {
-                this.appModel.renameTag(this.model.get('title'), undefined);
-                Backbone.trigger('select-all');
+                this.model.renameTag(this.tag.title, undefined);
+                Events.emit('select-all');
             }
         });
-    },
-
-    returnToApp: function() {
-        Backbone.trigger('edit-tag');
     }
-});
 
-module.exports = TagView;
+    returnToApp() {
+        Events.emit('edit-tag');
+    }
+}
+
+export { TagView };

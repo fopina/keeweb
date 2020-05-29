@@ -1,21 +1,26 @@
-const Backbone = require('backbone');
+import { View } from 'framework/views/view';
 
-const ListWrapView = Backbone.View.extend({
-    events: {
-    },
+class ListWrapView extends View {
+    parent = '.app__list-wrap';
 
-    initialize: function() {
+    template = () => '';
+
+    events = {};
+
+    constructor(model, options) {
+        super(model, options);
         this.listenTo(this.model.settings, 'change:tableView', this.setListLayout);
-    },
-
-    render: function() {
-        this.setListLayout();
-    },
-
-    setListLayout: function() {
-        const tableView = this.model.settings.get('tableView');
-        this.$el.toggleClass('app__list-wrap--table', tableView);
     }
-});
 
-module.exports = ListWrapView;
+    render() {
+        super.render();
+        this.setListLayout();
+    }
+
+    setListLayout() {
+        const tableView = !!this.model.settings.tableView;
+        this.el.classList.toggle('app__list-wrap--table', tableView);
+    }
+}
+
+export { ListWrapView };

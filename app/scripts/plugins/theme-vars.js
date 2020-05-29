@@ -1,6 +1,7 @@
-const ThemeVarsScss = require('../../styles/base/_theme-vars.scss');
-const ThemeDefaults = require('../../styles/themes/_theme-defaults.scss');
-const Color = require('../util/color');
+import { Color } from 'util/data/color';
+
+import ThemeVarsScss from '!!raw-loader!../../styles/base/_theme-vars.scss';
+import ThemeDefaults from '!!raw-loader!../../styles/themes/_theme-defaults.scss';
 
 const ThemeVars = {
     themeDefaults: null,
@@ -43,7 +44,11 @@ const ThemeVars = {
                 result = result.replace(/([\w\-]+)\([^()]+\)/, fnText => {
                     replaced = true;
                     const [, name, argsStr] = fnText.match(/([\w\-]+)\((.*)\)/);
-                    const args = argsStr.trim().split(/\s*,\s*/).filter(arg => arg).map(arg => this.resolveArg(arg, cssStyle, locals));
+                    const args = argsStr
+                        .trim()
+                        .split(/\s*,\s*/)
+                        .filter(arg => arg)
+                        .map(arg => this.resolveArg(arg, cssStyle, locals));
                     locals.push(this.fn[name](...args));
                     return 'L' + (locals.length - 1);
                 });
@@ -114,4 +119,4 @@ const ThemeVars = {
     }
 };
 
-module.exports = ThemeVars;
+export { ThemeVars };

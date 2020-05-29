@@ -1,50 +1,54 @@
-const Backbone = require('backbone');
-const kdbxweb = require('kdbxweb');
-const GroupModel = require('../../models/group-model');
-const AppSettingsModel = require('../../models/app-settings-model');
-const Scrollable = require('../../mixins/scrollable');
-const FieldViewText = require('../fields/field-view-text');
-const FieldViewSelect = require('../fields/field-view-select');
-const FieldViewAutocomplete = require('../fields/field-view-autocomplete');
-const FieldViewDate = require('../fields/field-view-date');
-const FieldViewTags = require('../fields/field-view-tags');
-const FieldViewUrl = require('../fields/field-view-url');
-const FieldViewReadOnly = require('../fields/field-view-read-only');
-const FieldViewHistory = require('../fields/field-view-history');
-const FieldViewCustom = require('../fields/field-view-custom');
-const FieldViewOtp = require('../fields/field-view-otp');
-const IconSelectView = require('../icon-select-view');
-const DetailsHistoryView = require('./details-history-view');
-const DetailsAttachmentView = require('./details-attachment-view');
-const DetailsAddFieldView = require('./details-add-field-view');
-const DetailsAutoTypeView = require('./details-auto-type-view');
-const DropdownView = require('../../views/dropdown-view');
-const Keys = require('../../const/keys');
-const KeyHandler = require('../../comp/key-handler');
-const Alerts = require('../../comp/alerts');
-const CopyPaste = require('../../comp/copy-paste');
-const OtpQrReader = require('../../comp/otp-qr-reader');
-const AutoType = require('../../auto-type');
-const Format = require('../../util/format');
-const Locale = require('../../util/locale');
-const Tip = require('../../util/tip');
-const FileSaver = require('../../util/file-saver');
-const Timeouts = require('../../const/timeouts');
-const Copyable = require('../../mixins/copyable');
+import kdbxweb from 'kdbxweb';
+import { View } from 'framework/views/view';
+import { Events } from 'framework/events';
+import { AutoType } from 'auto-type';
+import { CopyPaste } from 'comp/browser/copy-paste';
+import { KeyHandler } from 'comp/browser/key-handler';
+import { OtpQrReader } from 'comp/format/otp-qr-reader';
+import { Alerts } from 'comp/ui/alerts';
+import { Keys } from 'const/keys';
+import { Timeouts } from 'const/timeouts';
+import { AppSettingsModel } from 'models/app-settings-model';
+import { GroupModel } from 'models/group-model';
+import { Features } from 'util/features';
+import { DateFormat } from 'util/formatting/date-format';
+import { StringFormat } from 'util/formatting/string-format';
+import { Locale } from 'util/locale';
+import { FileSaver } from 'util/ui/file-saver';
+import { Tip } from 'util/ui/tip';
+import { Copyable } from 'framework/views/copyable';
+import { Scrollable } from 'framework/views/scrollable';
+import { DetailsAddFieldView } from 'views/details/details-add-field-view';
+import { DetailsAttachmentView } from 'views/details/details-attachment-view';
+import { DetailsAutoTypeView } from 'views/details/details-auto-type-view';
+import { DetailsHistoryView } from 'views/details/details-history-view';
+import { DropdownView } from 'views/dropdown-view';
+import { FieldViewAutocomplete } from 'views/fields/field-view-autocomplete';
+import { FieldViewCustom } from 'views/fields/field-view-custom';
+import { FieldViewDate } from 'views/fields/field-view-date';
+import { FieldViewHistory } from 'views/fields/field-view-history';
+import { FieldViewOtp } from 'views/fields/field-view-otp';
+import { FieldViewReadOnly } from 'views/fields/field-view-read-only';
+import { FieldViewSelect } from 'views/fields/field-view-select';
+import { FieldViewTags } from 'views/fields/field-view-tags';
+import { FieldViewText } from 'views/fields/field-view-text';
+import { FieldViewUrl } from 'views/fields/field-view-url';
+import { IconSelectView } from 'views/icon-select-view';
+import { isEqual } from 'util/fn';
+import template from 'templates/details/details.hbs';
+import emptyTemplate from 'templates/details/details-empty.hbs';
+import groupTemplate from 'templates/details/details-group.hbs';
 
-const DetailsView = Backbone.View.extend({
-    template: require('templates/details/details.hbs'),
-    emptyTemplate: require('templates/details/details-empty.hbs'),
-    groupTemplate: require('templates/details/details-group.hbs'),
+class DetailsView extends View {
+    parent = '.app__details';
+    fieldViews = [];
+    passEditView = null;
+    userEditView = null;
+    urlEditView = null;
+    otpEditView = null;
+    fieldCopyTip = null;
 
-    fieldViews: null,
-    views: null,
-    passEditView: null,
-    userEditView: null,
-    urlEditView: null,
-    fieldCopyTip: null,
-
-    events: {
+    events = {
         'click .details__colors-popup-item': 'selectColor',
         'click .details__header-icon': 'toggleIcons',
         'click .details__attachment': 'toggleAttachment',
@@ -59,63 +63,76 @@ const DetailsView = Backbone.View.extend({
         'dragleave .details': 'dragleave',
         'drop .details': 'drop',
         'contextmenu .details': 'contextMenu'
-    },
+    };
 
-    initialize: function () {
-        this.fieldViews = [];
-        this.views = {};
+    constructor(model, options) {
+        super(model, options);
         this.initScroll();
-        this.listenTo(Backbone, 'entry-selected', this.showEntry);
-        this.listenTo(Backbone, 'copy-password', this.copyPassword);
-        this.listenTo(Backbone, 'copy-user', this.copyUserName);
-        this.listenTo(Backbone, 'copy-url', this.copyUrl);
-        this.listenTo(Backbone, 'toggle-settings', this.settingsToggled);
-        this.listenTo(Backbone, 'context-menu-select', this.contextMenuSelect);
-        this.listenTo(Backbone, 'set-locale', this.render);
-        this.listenTo(OtpQrReader, 'qr-read', this.otpCodeRead);
-        this.listenTo(OtpQrReader, 'enter-manually', this.otpEnterManually);
-        KeyHandler.onKey(Keys.DOM_VK_C, this.copyPassword, this, KeyHandler.SHORTCUT_ACTION);
-        KeyHandler.onKey(Keys.DOM_VK_B, this.copyUserName, this, KeyHandler.SHORTCUT_ACTION);
-        KeyHandler.onKey(Keys.DOM_VK_U, this.copyUrl, this, KeyHandler.SHORTCUT_ACTION);
+        this.listenTo(Events, 'entry-selected', this.showEntry);
+        this.listenTo(Events, 'copy-password', this.copyPassword);
+        this.listenTo(Events, 'copy-user', this.copyUserName);
+        this.listenTo(Events, 'copy-url', this.copyUrl);
+        this.listenTo(Events, 'copy-otp', this.copyOtp);
+        this.listenTo(Events, 'toggle-settings', this.settingsToggled);
+        this.listenTo(Events, 'context-menu-select', this.contextMenuSelect);
+        this.listenTo(Events, 'set-locale', this.render);
+        this.listenTo(Events, 'qr-read', this.otpCodeRead);
+        this.listenTo(Events, 'qr-enter-manually', this.otpEnterManually);
+        this.onKey(
+            Keys.DOM_VK_C,
+            this.copyPasswordFromShortcut,
+            KeyHandler.SHORTCUT_ACTION,
+            false,
+            true
+        );
+        this.onKey(Keys.DOM_VK_B, this.copyUserName, KeyHandler.SHORTCUT_ACTION);
+        this.onKey(Keys.DOM_VK_U, this.copyUrl, KeyHandler.SHORTCUT_ACTION);
         if (AutoType.enabled) {
-            KeyHandler.onKey(Keys.DOM_VK_T, this.autoType, this, KeyHandler.SHORTCUT_ACTION);
+            this.onKey(Keys.DOM_VK_T, this.autoType, KeyHandler.SHORTCUT_ACTION);
         }
-        KeyHandler.onKey(Keys.DOM_VK_DELETE, this.deleteKeyPress, this, KeyHandler.SHORTCUT_ACTION, false, true);
-        KeyHandler.onKey(Keys.DOM_VK_BACK_SPACE, this.deleteKeyPress, this, KeyHandler.SHORTCUT_ACTION, false, true);
-    },
+        this.onKey(
+            Keys.DOM_VK_DELETE,
+            this.deleteKeyPress,
+            KeyHandler.SHORTCUT_ACTION,
+            false,
+            true
+        );
+        this.onKey(
+            Keys.DOM_VK_BACK_SPACE,
+            this.deleteKeyPress,
+            KeyHandler.SHORTCUT_ACTION,
+            false,
+            true
+        );
+        this.once('remove', () => {
+            this.removeFieldViews();
+        });
+    }
 
-    remove: function() {
-        KeyHandler.offKey(Keys.DOM_VK_C, this.copyPassword, this);
-        KeyHandler.offKey(Keys.DOM_VK_B, this.copyUserName, this);
-        KeyHandler.offKey(Keys.DOM_VK_U, this.copyUrl, this);
-        KeyHandler.offKey(Keys.DOM_VK_DELETE, this.deleteKeyPress, this, KeyHandler.SHORTCUT_ACTION);
-        KeyHandler.offKey(Keys.DOM_VK_BACK_SPACE, this.deleteKeyPress, this, KeyHandler.SHORTCUT_ACTION);
-        this.removeFieldViews();
-        Backbone.View.prototype.remove.call(this);
-    },
-
-    removeFieldViews: function() {
+    removeFieldViews() {
         this.fieldViews.forEach(fieldView => fieldView.remove());
         this.fieldViews = [];
         this.hideFieldCopyTip();
-    },
+    }
 
-    render: function () {
+    render() {
+        Tip.destroyTips(this.$el);
         this.removeScroll();
         this.removeFieldViews();
         this.removeInnerViews();
         if (!this.model) {
-            this.$el.html(this.emptyTemplate());
+            this.template = emptyTemplate;
+            super.render();
             return;
         }
         if (this.model instanceof GroupModel) {
-            this.$el.html(this.groupTemplate());
-            Tip.createTips(this.$el);
+            this.template = groupTemplate;
+            super.render();
             return;
         }
-        const model = $.extend({ deleted: this.appModel.filter.trash }, this.model);
-        this.$el.html(this.template(model));
-        Tip.createTips(this.$el);
+        const model = { deleted: this.appModel.filter.trash, ...this.model };
+        this.template = template;
+        super.render(model);
         this.setSelectedColor(this.model.color);
         this.model.initOtpGenerator();
         this.addFieldViews();
@@ -131,81 +148,191 @@ const DetailsView = Backbone.View.extend({
         }
         this.pageResized();
         this.showCopyTip();
-        return this;
-    },
+    }
 
-    addFieldViews: function() {
+    addFieldViews() {
         const model = this.model;
         if (model.isJustCreated && this.appModel.files.length > 1) {
             const fileNames = this.appModel.files.map(function(file) {
-                return { id: file.id, value: file.get('name'), selected: file === this.model.file };
+                return { id: file.id, value: file.name, selected: file === this.model.file };
             }, this);
-            this.fileEditView = new FieldViewSelect({ model: { name: '$File', title: Format.capFirst(Locale.file),
-                value: function() { return fileNames; } } });
+            this.fileEditView = new FieldViewSelect({
+                name: '$File',
+                title: StringFormat.capFirst(Locale.file),
+                value() {
+                    return fileNames;
+                }
+            });
             this.fieldViews.push(this.fileEditView);
         } else {
-            this.fieldViews.push(new FieldViewReadOnly({ model: { name: 'File', title: Format.capFirst(Locale.file),
-                value: function() { return model.fileName; } } }));
+            this.fieldViews.push(
+                new FieldViewReadOnly({
+                    name: 'File',
+                    title: StringFormat.capFirst(Locale.file),
+                    value() {
+                        return model.fileName;
+                    }
+                })
+            );
         }
-        this.userEditView = new FieldViewAutocomplete({ model: { name: '$UserName', title: Format.capFirst(Locale.user),
-            value: function() { return model.user; }, getCompletions: this.getUserNameCompletions.bind(this) } });
+        this.userEditView = new FieldViewAutocomplete({
+            name: '$UserName',
+            title: StringFormat.capFirst(Locale.user),
+            value() {
+                return model.user;
+            },
+            getCompletions: this.getUserNameCompletions.bind(this),
+            sequence: '{USERNAME}'
+        });
         this.fieldViews.push(this.userEditView);
-        this.passEditView = new FieldViewText({ model: { name: '$Password', title: Format.capFirst(Locale.password), canGen: true,
-            value: function() { return model.password; } } });
+        this.passEditView = new FieldViewText({
+            name: '$Password',
+            title: StringFormat.capFirst(Locale.password),
+            canGen: true,
+            value() {
+                return model.password;
+            },
+            sequence: '{PASSWORD}'
+        });
         this.fieldViews.push(this.passEditView);
-        this.urlEditView = new FieldViewUrl({ model: { name: '$URL', title: Format.capFirst(Locale.website),
-            value: function() { return model.url; } } });
+        this.urlEditView = new FieldViewUrl({
+            name: '$URL',
+            title: StringFormat.capFirst(Locale.website),
+            value() {
+                return model.url;
+            },
+            sequence: '{URL}'
+        });
         this.fieldViews.push(this.urlEditView);
-        this.fieldViews.push(new FieldViewText({ model: { name: '$Notes', title: Format.capFirst(Locale.notes), multiline: 'true',
-            value: function() { return model.notes; } } }));
-        this.fieldViews.push(new FieldViewTags({ model: { name: 'Tags', title: Format.capFirst(Locale.tags), tags: this.appModel.tags,
-            value: function() { return model.tags; } } }));
-        this.fieldViews.push(new FieldViewDate({ model: { name: 'Expires', title: Locale.detExpires, lessThanNow: '(' + Locale.detExpired + ')',
-            value: function() { return model.expires; } } }));
-        this.fieldViews.push(new FieldViewReadOnly({ model: { name: 'Group', title: Locale.detGroup,
-            value: function() { return model.groupName; }, tip: function() { return model.getGroupPath().join(' / '); } } }));
-        this.fieldViews.push(new FieldViewReadOnly({ model: { name: 'Created', title: Locale.detCreated,
-            value: function() { return Format.dtStr(model.created); } } }));
-        this.fieldViews.push(new FieldViewReadOnly({ model: { name: 'Updated', title: Locale.detUpdated,
-            value: function() { return Format.dtStr(model.updated); } } }));
-        this.fieldViews.push(new FieldViewHistory({ model: { name: 'History', title: Format.capFirst(Locale.history),
-            value: function() { return { length: model.historyLength, unsaved: model.unsaved }; } } }));
-        _.forEach(model.fields, function(value, field) {
+        this.fieldViews.push(
+            new FieldViewText({
+                name: '$Notes',
+                title: StringFormat.capFirst(Locale.notes),
+                multiline: 'true',
+                markdown: true,
+                value() {
+                    return model.notes;
+                },
+                sequence: '{NOTES}'
+            })
+        );
+        this.fieldViews.push(
+            new FieldViewTags({
+                name: 'Tags',
+                title: StringFormat.capFirst(Locale.tags),
+                tags: this.appModel.tags,
+                value() {
+                    return model.tags;
+                }
+            })
+        );
+        this.fieldViews.push(
+            new FieldViewDate({
+                name: 'Expires',
+                title: Locale.detExpires,
+                lessThanNow: '(' + Locale.detExpired + ')',
+                value() {
+                    return model.expires;
+                }
+            })
+        );
+        this.fieldViews.push(
+            new FieldViewReadOnly({
+                name: 'Group',
+                title: Locale.detGroup,
+                value() {
+                    return model.groupName;
+                },
+                tip() {
+                    return model.getGroupPath().join(' / ');
+                }
+            })
+        );
+        this.fieldViews.push(
+            new FieldViewReadOnly({
+                name: 'Created',
+                title: Locale.detCreated,
+                value() {
+                    return DateFormat.dtStr(model.created);
+                }
+            })
+        );
+        this.fieldViews.push(
+            new FieldViewReadOnly({
+                name: 'Updated',
+                title: Locale.detUpdated,
+                value() {
+                    return DateFormat.dtStr(model.updated);
+                }
+            })
+        );
+        this.fieldViews.push(
+            new FieldViewHistory({
+                name: 'History',
+                title: StringFormat.capFirst(Locale.history),
+                value() {
+                    return { length: model.historyLength, unsaved: model.unsaved };
+                }
+            })
+        );
+        this.otpEditView = null;
+        for (const field of Object.keys(model.fields)) {
             if (field === 'otp' && this.model.otpGenerator) {
-                this.fieldViews.push(new FieldViewOtp({ model: { name: '$' + field, title: field,
-                    value: function() { return model.otpGenerator; } } }));
+                this.otpEditView = new FieldViewOtp({
+                    name: '$' + field,
+                    title: field,
+                    value() {
+                        return model.otpGenerator;
+                    },
+                    sequence: '{TOTP}'
+                });
+                this.fieldViews.push(this.otpEditView);
             } else {
-                this.fieldViews.push(new FieldViewCustom({ model: { name: '$' + field, title: field,
-                    value: function() { return model.fields[field]; } } }));
+                this.fieldViews.push(
+                    new FieldViewCustom({
+                        name: '$' + field,
+                        title: field,
+                        multiline: true,
+                        value() {
+                            return model.fields[field];
+                        },
+                        sequence: `{S:${field}}`
+                    })
+                );
             }
-        }, this);
+        }
 
-        const hideEmptyFields = AppSettingsModel.instance.get('hideEmptyFields');
+        const hideEmptyFields = AppSettingsModel.hideEmptyFields;
 
         const fieldsMainEl = this.$el.find('.details__body-fields');
         const fieldsAsideEl = this.$el.find('.details__body-aside');
-        this.fieldViews.forEach(function(fieldView) {
-            fieldView.setElement(fieldView.readonly ? fieldsAsideEl : fieldsMainEl).render();
+        this.fieldViews.forEach(fieldView => {
+            fieldView.parent = fieldView.readonly ? fieldsAsideEl[0] : fieldsMainEl[0];
+            fieldView.render();
             fieldView.on('change', this.fieldChanged.bind(this));
             fieldView.on('copy', this.fieldCopied.bind(this));
+            fieldView.on('autotype', this.fieldAutoType.bind(this));
             if (hideEmptyFields) {
                 const value = fieldView.model.value();
                 if (!value || value.length === 0 || value.byteLength === 0) {
-                    if (this.model.isJustCreated && ['$UserName', '$Password'].indexOf(fieldView.model.name) >= 0) {
+                    if (
+                        this.model.isJustCreated &&
+                        ['$UserName', '$Password'].indexOf(fieldView.model.name) >= 0
+                    ) {
                         return; // don't hide user for new records
                     }
                     fieldView.hide();
                 }
             }
-        }, this);
+        });
 
         this.moreView = new DetailsAddFieldView();
-        this.moreView.setElement(fieldsMainEl).render();
+        this.moreView.render();
         this.moreView.on('add-field', this.addNewField.bind(this));
         this.moreView.on('more-click', this.toggleMoreOptions.bind(this));
-    },
+    }
 
-    addNewField: function() {
+    addNewField() {
         this.moreView.remove();
         this.moreView = null;
         let newFieldTitle = Locale.detNetField;
@@ -218,65 +345,106 @@ const DetailsView = Backbone.View.extend({
                 }
             }
         }
-        const fieldView = new FieldViewCustom({ model: { name: '$' + newFieldTitle, title: newFieldTitle, newField: newFieldTitle,
-            value: function() { return ''; } } });
+        const fieldView = new FieldViewCustom(
+            {
+                name: '$' + newFieldTitle,
+                title: newFieldTitle,
+                newField: newFieldTitle,
+                multiline: true,
+                value() {
+                    return '';
+                }
+            },
+            {
+                parent: this.$el.find('.details__body-fields')[0]
+            }
+        );
         fieldView.on('change', this.fieldChanged.bind(this));
-        fieldView.setElement(this.$el.find('.details__body-fields')).render();
+        fieldView.render();
         fieldView.edit();
         this.fieldViews.push(fieldView);
-    },
+    }
 
-    toggleMoreOptions: function() {
+    toggleMoreOptions() {
         if (this.views.dropdownView) {
             this.views.dropdownView.remove();
             this.views.dropdownView = null;
         } else {
-            this.setTimeout(function() {
+            setTimeout(() => {
                 const dropdownView = new DropdownView();
                 this.listenTo(dropdownView, 'cancel', this.toggleMoreOptions);
                 this.listenTo(dropdownView, 'select', this.moreOptionsSelect);
-                const hideEmptyFields = AppSettingsModel.instance.get('hideEmptyFields');
+                const hideEmptyFields = AppSettingsModel.hideEmptyFields;
                 const moreOptions = [];
                 if (hideEmptyFields) {
                     this.fieldViews.forEach(fieldView => {
                         if (fieldView.isHidden()) {
-                            moreOptions.push({value: 'add:' + fieldView.model.name, icon: 'pencil',
-                                text: Locale.detMenuAddField.replace('{}', fieldView.model.title)});
+                            moreOptions.push({
+                                value: 'add:' + fieldView.model.name,
+                                icon: 'pencil',
+                                text: Locale.detMenuAddField.replace('{}', fieldView.model.title)
+                            });
                         }
                     }, this);
-                    moreOptions.push({value: 'add-new', icon: 'plus', text: Locale.detMenuAddNewField});
-                    moreOptions.push({value: 'toggle-empty', icon: 'eye', text: Locale.detMenuShowEmpty});
+                    moreOptions.push({
+                        value: 'add-new',
+                        icon: 'plus',
+                        text: Locale.detMenuAddNewField
+                    });
+                    moreOptions.push({
+                        value: 'toggle-empty',
+                        icon: 'eye',
+                        text: Locale.detMenuShowEmpty
+                    });
                 } else {
-                    moreOptions.push({value: 'add-new', icon: 'plus', text: Locale.detMenuAddNewField});
-                    moreOptions.push({value: 'toggle-empty', icon: 'eye-slash', text: Locale.detMenuHideEmpty});
+                    moreOptions.push({
+                        value: 'add-new',
+                        icon: 'plus',
+                        text: Locale.detMenuAddNewField
+                    });
+                    moreOptions.push({
+                        value: 'toggle-empty',
+                        icon: 'eye-slash',
+                        text: Locale.detMenuHideEmpty
+                    });
                 }
-                moreOptions.push({value: 'otp', icon: 'clock-o', text: Locale.detSetupOtp});
+                moreOptions.push({ value: 'otp', icon: 'clock-o', text: Locale.detSetupOtp });
                 if (AutoType.enabled) {
-                    moreOptions.push({value: 'auto-type', icon: 'keyboard-o', text: Locale.detAutoTypeSettings});
+                    moreOptions.push({
+                        value: 'auto-type',
+                        icon: 'keyboard-o',
+                        text: Locale.detAutoTypeSettings
+                    });
                 }
-                moreOptions.push({value: 'clone', icon: 'clone', text: Locale.detClone});
+                moreOptions.push({ value: 'clone', icon: 'clone', text: Locale.detClone });
+                moreOptions.push({
+                    value: 'copy-to-clipboard',
+                    icon: 'copy',
+                    text: Locale.detCopyEntryToClipboard
+                });
                 const rect = this.moreView.labelEl[0].getBoundingClientRect();
                 dropdownView.render({
-                    position: {top: rect.bottom, left: rect.left},
+                    position: { top: rect.bottom, left: rect.left },
                     options: moreOptions
                 });
                 this.views.dropdownView = dropdownView;
             });
         }
-    },
+    }
 
-    moreOptionsSelect: function(e) {
+    moreOptionsSelect(e) {
         this.views.dropdownView.remove();
         this.views.dropdownView = null;
         switch (e.item) {
             case 'add-new':
                 this.addNewField();
                 break;
-            case 'toggle-empty':
-                const hideEmptyFields = AppSettingsModel.instance.get('hideEmptyFields');
-                AppSettingsModel.instance.set('hideEmptyFields', !hideEmptyFields);
+            case 'toggle-empty': {
+                const hideEmptyFields = AppSettingsModel.hideEmptyFields;
+                AppSettingsModel.hideEmptyFields = !hideEmptyFields;
                 this.render();
                 break;
+            }
             case 'otp':
                 this.setupOtp();
                 break;
@@ -286,36 +454,45 @@ const DetailsView = Backbone.View.extend({
             case 'clone':
                 this.clone();
                 break;
+            case 'copy-to-clipboard':
+                this.copyToClipboard();
+                break;
             default:
                 if (e.item.lastIndexOf('add:', 0) === 0) {
                     const fieldName = e.item.substr(4);
-                    const fieldView = _.find(this.fieldViews, f => f.model.name === fieldName);
+                    const fieldView = this.fieldViews.find(f => f.model.name === fieldName);
                     fieldView.show();
                     fieldView.edit();
                 }
         }
-    },
+    }
 
-    getUserNameCompletions: function(part) {
+    getUserNameCompletions(part) {
         return this.appModel.completeUserNames(part);
-    },
+    }
 
-    setSelectedColor: function(color) {
-        this.$el.find('.details__colors-popup > .details__colors-popup-item').removeClass('details__colors-popup-item--active');
+    setSelectedColor(color) {
+        this.$el
+            .find('.details__colors-popup > .details__colors-popup-item')
+            .removeClass('details__colors-popup-item--active');
         const colorEl = this.$el.find('.details__header-color')[0];
-        _.forEach(colorEl.classList, cls => {
+        for (const cls of colorEl.classList) {
             if (cls.indexOf('color') > 0 && cls.lastIndexOf('details', 0) !== 0) {
                 colorEl.classList.remove(cls);
             }
-        });
+        }
         if (color) {
-            this.$el.find('.details__colors-popup > .' + color + '-color').addClass('details__colors-popup-item--active');
+            this.$el
+                .find('.details__colors-popup > .' + color + '-color')
+                .addClass('details__colors-popup-item--active');
             colorEl.classList.add(color + '-color');
         }
-    },
+    }
 
-    selectColor: function(e) {
-        let color = $(e.target).closest('.details__colors-popup-item').data('color');
+    selectColor(e) {
+        let color = $(e.target)
+            .closest('.details__colors-popup-item')
+            .data('color');
         if (!color) {
             return;
         }
@@ -324,28 +501,32 @@ const DetailsView = Backbone.View.extend({
         }
         this.model.setColor(color);
         this.entryUpdated();
-    },
+    }
 
-    toggleIcons: function() {
+    toggleIcons() {
         if (this.views.sub && this.views.sub instanceof IconSelectView) {
             this.render();
             return;
         }
         this.removeSubView();
-        const subView = new IconSelectView({
-            el: this.scroller,
-            model: {
+        const subView = new IconSelectView(
+            {
                 iconId: this.model.customIconId || this.model.iconId,
-                url: this.model.url, file: this.model.file
+                url: this.model.url,
+                file: this.model.file
+            },
+            {
+                parent: this.scroller[0],
+                replace: true
             }
-        });
+        );
         this.listenTo(subView, 'select', this.iconSelected);
         subView.render();
         this.pageResized();
         this.views.sub = subView;
-    },
+    }
 
-    toggleAttachment: function(e) {
+    toggleAttachment(e) {
         const attBtn = $(e.target).closest('.details__attachment');
         const id = attBtn.data('id');
         const attachment = this.model.attachments[id];
@@ -358,32 +539,37 @@ const DetailsView = Backbone.View.extend({
             return;
         }
         this.removeSubView();
-        const subView = new DetailsAttachmentView({ el: this.scroller, model: attachment });
+        const subView = new DetailsAttachmentView(attachment, {
+            parent: this.scroller[0],
+            replace: true
+        });
         subView.attId = id;
         subView.render(this.pageResized.bind(this));
+        subView.on('download', () => this.downloadAttachment(attachment));
+        this.listenTo(subView, 'close', this.render.bind(this));
         this.views.sub = subView;
         attBtn.addClass('details__attachment--active');
-    },
+    }
 
-    removeSubView: function() {
+    removeSubView() {
         this.$el.find('.details__attachment').removeClass('details__attachment--active');
         if (this.views.sub) {
             this.views.sub.remove();
             delete this.views.sub;
         }
-    },
+    }
 
-    downloadAttachment: function(attachment) {
+    downloadAttachment(attachment) {
         const data = attachment.getBinary();
         if (!data) {
             return;
         }
         const mimeType = attachment.mimeType || 'application/octet-stream';
-        const blob = new Blob([data], {type: mimeType});
+        const blob = new Blob([data], { type: mimeType });
         FileSaver.saveAs(blob, attachment.title);
-    },
+    }
 
-    iconSelected: function(sel) {
+    iconSelected(sel) {
         if (sel.custom) {
             if (sel.id !== this.model.customIconId) {
                 this.model.setCustomIcon(sel.id);
@@ -397,21 +583,22 @@ const DetailsView = Backbone.View.extend({
         } else {
             this.render();
         }
-    },
+    }
 
-    showEntry: function(entry) {
+    showEntry(entry) {
         this.model = entry;
         this.render();
         if (entry && !entry.title && entry.isJustCreated) {
             this.editTitle();
         }
-    },
+    }
 
-    copyKeyPress: function(editView) {
-        if (this.isHidden()) { return; }
+    copyKeyPress(editView) {
+        if (this.isHidden()) {
+            return false;
+        }
         if (!window.getSelection().toString()) {
-            const fieldValue = editView.value;
-            const fieldText = fieldValue && fieldValue.isProtected ? fieldValue.getText() : fieldValue;
+            const fieldText = editView.getTextValue();
             if (!fieldText) {
                 return;
             }
@@ -419,44 +606,61 @@ const DetailsView = Backbone.View.extend({
                 CopyPaste.createHiddenInput(fieldText);
             }
             const copyRes = CopyPaste.copy(fieldText);
-            this.fieldCopied({ source: editView, copyRes: copyRes });
+            this.fieldCopied({ source: editView, copyRes });
+            return true;
         }
-    },
+        return false;
+    }
 
-    copyPassword: function() {
+    copyPasswordFromShortcut(e) {
+        const copied = this.copyKeyPress(this.passEditView);
+        if (copied) {
+            e.preventDefault();
+        }
+    }
+
+    copyPassword() {
         this.copyKeyPress(this.passEditView);
-    },
+    }
 
-    copyUserName: function() {
+    copyUserName() {
         this.copyKeyPress(this.userEditView);
-    },
+    }
 
-    copyUrl: function() {
+    copyUrl() {
         this.copyKeyPress(this.urlEditView);
-    },
+    }
 
-    showCopyTip: function() {
+    copyOtp() {
+        if (this.otpEditView) {
+            this.copyKeyPress(this.otpEditView);
+        }
+    }
+
+    showCopyTip() {
         if (this.helpTipCopyShown) {
             return;
         }
-        this.helpTipCopyShown = AppSettingsModel.instance.get('helpTipCopyShown');
+        this.helpTipCopyShown = AppSettingsModel.helpTipCopyShown;
         if (this.helpTipCopyShown) {
             return;
         }
-        AppSettingsModel.instance.set('helpTipCopyShown', true);
+        AppSettingsModel.helpTipCopyShown = true;
         this.helpTipCopyShown = true;
         const label = this.moreView.labelEl;
         const tip = new Tip(label, { title: Locale.detCopyHint, placement: 'right' });
         tip.show();
         this.fieldCopyTip = tip;
-        setTimeout(() => { tip.hide(); }, Timeouts.AutoHideHint);
-    },
+        setTimeout(() => {
+            tip.hide();
+        }, Timeouts.AutoHideHint);
+    }
 
-    settingsToggled: function() {
+    settingsToggled() {
         this.hideFieldCopyTip();
-    },
+    }
 
-    fieldChanged: function(e) {
+    fieldChanged(e) {
         if (e.field) {
             if (e.field[0] === '$') {
                 let fieldName = e.field.substr(1);
@@ -484,7 +688,7 @@ const DetailsView = Backbone.View.extend({
                     this.model.moveToFile(newFile);
                     this.appModel.activeEntryId = this.model.id;
                     this.entryUpdated();
-                    Backbone.trigger('entry-selected', this.model);
+                    Events.emit('entry-selected', this.model);
                     return;
                 } else if (fieldName) {
                     this.model.setField(fieldName, e.val);
@@ -494,14 +698,17 @@ const DetailsView = Backbone.View.extend({
                 this.appModel.updateTags();
             } else if (e.field === 'Expires') {
                 const dt = e.val || undefined;
-                if (!_.isEqual(dt, this.model.expires)) {
+                if (!isEqual(dt, this.model.expires)) {
                     this.model.setExpires(dt);
                 }
             }
             this.entryUpdated(true);
             this.fieldViews.forEach(function(fieldView, ix) {
-                if (fieldView instanceof FieldViewCustom && !fieldView.model.newField &&
-                    !this.model.hasField(fieldView.model.title)) {
+                if (
+                    fieldView instanceof FieldViewCustom &&
+                    !fieldView.model.newField &&
+                    !this.model.hasField(fieldView.model.title)
+                ) {
                     fieldView.remove();
                     this.fieldViews.splice(ix, 1);
                 } else {
@@ -515,9 +722,9 @@ const DetailsView = Backbone.View.extend({
         if (e.tab) {
             this.focusNextField(e.tab);
         }
-    },
+    }
 
-    otpFieldChanged: function(value) {
+    otpFieldChanged(value) {
         let oldValue = this.model.fields.otp;
         if (oldValue && oldValue.isProtected) {
             oldValue = oldValue.getText();
@@ -531,13 +738,16 @@ const DetailsView = Backbone.View.extend({
         }
         this.model.setOtpUrl(value);
         return true;
-    },
+    }
 
-    dragover: function(e) {
+    dragover(e) {
         e.preventDefault();
         e.stopPropagation();
-        const dt = e.originalEvent.dataTransfer;
-        if (!dt.types || (dt.types.indexOf ? dt.types.indexOf('Files') === -1 : !dt.types.contains('Files'))) {
+        const dt = e.dataTransfer;
+        if (
+            !dt.types ||
+            (dt.types.indexOf ? dt.types.indexOf('Files') === -1 : !dt.types.contains('Files'))
+        ) {
             dt.dropEffect = 'none';
             return;
         }
@@ -549,9 +759,9 @@ const DetailsView = Backbone.View.extend({
             this.dragging = true;
             this.$el.find('.details').addClass('details--drag');
         }
-    },
+    }
 
-    dragleave: function() {
+    dragleave() {
         if (this.dragTimeout) {
             clearTimeout(this.dragTimeout);
         }
@@ -559,9 +769,9 @@ const DetailsView = Backbone.View.extend({
             this.$el.find('.details').removeClass('details--drag');
             this.dragging = false;
         }, 100);
-    },
+    }
 
-    drop: function(e) {
+    drop(e) {
         e.preventDefault();
         if (!this.model) {
             return;
@@ -571,44 +781,44 @@ const DetailsView = Backbone.View.extend({
         }
         this.$el.find('.details').removeClass('details--drag');
         this.dragging = false;
-        const files = e.target.files || e.originalEvent.dataTransfer.files;
+        const files = e.target.files || e.dataTransfer.files;
         this.addAttachedFiles(files);
-    },
+    }
 
-    attachmentBtnClick: function() {
+    attachmentBtnClick() {
         this.$el.find('.details__attachment-input-file')[0].click();
-    },
+    }
 
-    attachmentFileChange: function(e) {
+    attachmentFileChange(e) {
         this.addAttachedFiles(e.target.files);
-    },
+    }
 
-    addAttachedFiles: function(files) {
-        _.forEach(files, function(file) {
+    addAttachedFiles(files) {
+        for (const file of files) {
             const reader = new FileReader();
             reader.onload = () => {
                 this.addAttachment(file.name, reader.result);
             };
             reader.readAsArrayBuffer(file);
-        }, this);
-    },
+        }
+    }
 
-    addAttachment: function(name, data) {
+    addAttachment(name, data) {
         this.model.addAttachment(name, data).then(() => {
             this.entryUpdated();
         });
-    },
+    }
 
-    deleteKeyPress: function(e) {
+    deleteKeyPress(e) {
         if (this.views.sub && this.views.sub.attId !== undefined) {
             e.preventDefault();
             const attachment = this.model.attachments[this.views.sub.attId];
             this.model.removeAttachment(attachment.title);
             this.render();
         }
-    },
+    }
 
-    editTitle: function() {
+    editTitle() {
         const input = $('<input/>')
             .addClass('details__header-title-input')
             .attr({ autocomplete: 'off', spellcheck: 'false', placeholder: 'Title' })
@@ -621,17 +831,17 @@ const DetailsView = Backbone.View.extend({
         });
         $('.details__header-title').replaceWith(input);
         input.focus()[0].setSelectionRange(this.model.title.length, this.model.title.length);
-    },
+    }
 
-    titleInputBlur: function(e) {
+    titleInputBlur(e) {
         this.setTitle(e.target.value);
-    },
+    }
 
-    titleInputInput: function(e) {
+    titleInputInput(e) {
         e.stopPropagation();
-    },
+    }
 
-    titleInputKeydown: function(e) {
+    titleInputKeydown(e) {
         KeyHandler.reg();
         e.stopPropagation();
         const code = e.keyCode || e.which;
@@ -642,7 +852,7 @@ const DetailsView = Backbone.View.extend({
             $(e.target).unbind('blur');
             if (this.model.isJustCreated) {
                 this.model.removeWithoutHistory();
-                Backbone.trigger('refresh');
+                Events.emit('refresh');
                 return;
             }
             this.render();
@@ -654,9 +864,9 @@ const DetailsView = Backbone.View.extend({
                 this.focusNextField({ field: '$Title' });
             }
         }
-    },
+    }
 
-    setTitle: function(title) {
+    setTitle(title) {
         if (this.model.title instanceof kdbxweb.ProtectedValue) {
             title = kdbxweb.ProtectedValue.fromString(title);
         }
@@ -666,17 +876,18 @@ const DetailsView = Backbone.View.extend({
         }
         const newTitle = $('<h1 class="details__header-title"></h1>').text(title || '(no title)');
         this.$el.find('.details__header-title-input').replaceWith(newTitle);
-    },
+    }
 
-    entryUpdated: function(skipRender) {
-        Backbone.trigger('entry-updated', { entry: this.model });
+    entryUpdated(skipRender) {
+        Events.emit('entry-updated', { entry: this.model });
         if (!skipRender) {
             this.render();
         }
-    },
+    }
 
-    focusNextField: function(config) {
-        let found = false, nextFieldView;
+    focusNextField(config) {
+        let found = false,
+            nextFieldView;
         if (config.field === '$Title' && !config.prev) {
             found = true;
         }
@@ -695,65 +906,103 @@ const DetailsView = Backbone.View.extend({
         if (nextFieldView) {
             nextFieldView.edit();
         }
-    },
+    }
 
-    showHistory: function() {
+    showHistory() {
         this.removeSubView();
-        const subView = new DetailsHistoryView({ el: this.scroller, model: this.model });
+        const subView = new DetailsHistoryView(this.model, {
+            parent: this.scroller[0],
+            replace: true
+        });
         this.listenTo(subView, 'close', this.historyClosed.bind(this));
         subView.render();
         this.pageResized();
         this.views.sub = subView;
-    },
+    }
 
-    historyClosed: function(e) {
+    historyClosed(e) {
         if (e.updated) {
             this.entryUpdated();
         } else {
             this.render();
         }
-    },
+    }
 
-    moveToTrash: function() {
-        this.model.moveToTrash();
-        Backbone.trigger('refresh');
-    },
+    moveToTrash() {
+        const doMove = () => {
+            this.model.moveToTrash();
+            Events.emit('refresh');
+        };
+        if (Features.isMobile) {
+            Alerts.yesno({
+                header: Locale.detDelToTrash,
+                body: Locale.detDelToTrashBody,
+                icon: 'trash',
+                success: doMove
+            });
+        } else {
+            doMove();
+        }
+    }
 
-    clone: function() {
+    clone() {
         const newEntry = this.model.cloneEntry(' ' + Locale.detClonedName);
-        Backbone.trigger('select-entry', newEntry);
-    },
+        Events.emit('select-entry', newEntry);
+    }
 
-    deleteFromTrash: function() {
+    copyToClipboard() {
+        CopyPaste.copyHtml(this.model.getHtml());
+    }
+
+    deleteFromTrash() {
         Alerts.yesno({
             header: Locale.detDelFromTrash,
-            body: Locale.detDelFromTrashBody + ' <p class="muted-color">' + Locale.detDelFromTrashBodyHint + '</p>',
+            body:
+                Locale.detDelFromTrashBody +
+                ' <p class="muted-color">' +
+                Locale.detDelFromTrashBodyHint +
+                '</p>',
             icon: 'minus-circle',
             success: () => {
                 this.model.deleteFromTrash();
-                Backbone.trigger('refresh');
+                Events.emit('refresh');
             }
         });
-    },
+    }
 
-    backClick: function() {
-        Backbone.trigger('toggle-details', false);
-    },
+    backClick() {
+        Events.emit('toggle-details', false);
+    }
 
     contextMenu(e) {
         const canCopy = document.queryCommandSupported('copy');
         const options = [];
         if (canCopy) {
-            options.push({ value: 'det-copy-password', icon: 'clipboard', text: Locale.detMenuCopyPassword });
-            options.push({ value: 'det-copy-user', icon: 'clipboard', text: Locale.detMenuCopyUser });
+            options.push({
+                value: 'det-copy-password',
+                icon: 'clipboard',
+                text: Locale.detMenuCopyPassword
+            });
+            options.push({
+                value: 'det-copy-user',
+                icon: 'clipboard',
+                text: Locale.detMenuCopyUser
+            });
         }
         options.push({ value: 'det-add-new', icon: 'plus', text: Locale.detMenuAddNewField });
         options.push({ value: 'det-clone', icon: 'clone', text: Locale.detClone });
+        if (canCopy) {
+            options.push({
+                value: 'copy-to-clipboard',
+                icon: 'copy',
+                text: Locale.detCopyEntryToClipboard
+            });
+        }
         if (AutoType.enabled) {
             options.push({ value: 'det-auto-type', icon: 'keyboard-o', text: Locale.detAutoType });
         }
-        Backbone.trigger('show-context-menu', _.extend(e, { options }));
-    },
+        Events.emit('show-context-menu', Object.assign(e, { options }));
+    }
 
     contextMenuSelect(e) {
         switch (e.item) {
@@ -772,19 +1021,22 @@ const DetailsView = Backbone.View.extend({
             case 'det-auto-type':
                 this.autoType();
                 break;
+            case 'copy-to-clipboard':
+                this.copyToClipboard();
+                break;
         }
-    },
+    }
 
-    setupOtp: function() {
+    setupOtp() {
         OtpQrReader.read();
-    },
+    }
 
-    otpCodeRead: function(otp) {
+    otpCodeRead(otp) {
         this.model.setOtp(otp);
         this.entryUpdated();
-    },
+    }
 
-    otpEnterManually: function() {
+    otpEnterManually() {
         if (this.model.fields.otp) {
             const otpField = this.fieldViews.find(f => f.model.name === '$otp');
             if (otpField) {
@@ -793,35 +1045,47 @@ const DetailsView = Backbone.View.extend({
         } else {
             this.moreView.remove();
             this.moreView = null;
-            const fieldView = new FieldViewCustom({ model: {
-                name: '$otp', title: 'otp', newField: 'otp',
-                value: kdbxweb.ProtectedValue.fromString('')
-            }});
+            const fieldView = new FieldViewCustom(
+                {
+                    name: '$otp',
+                    title: 'otp',
+                    newField: 'otp',
+                    value: kdbxweb.ProtectedValue.fromString('')
+                },
+                {
+                    parent: this.$el.find('.details__body-fields')[0]
+                }
+            );
             fieldView.on('change', this.fieldChanged.bind(this));
-            fieldView.setElement(this.$el.find('.details__body-fields')).render();
+            fieldView.render();
             fieldView.edit();
             this.fieldViews.push(fieldView);
         }
-    },
+    }
 
-    toggleAutoType: function() {
+    toggleAutoType() {
         if (this.views.autoType) {
             this.views.autoType.remove();
             delete this.views.autoType;
             return;
         }
-        this.views.autoType = new DetailsAutoTypeView({
-            el: this.$el.find('.details__body-after'),
-            model: this.model
-        }).render();
-    },
-
-    autoType: function() {
-        Backbone.trigger('auto-type', { entry: this.model });
+        this.views.autoType = new DetailsAutoTypeView(this.model);
+        this.views.autoType.render();
     }
-});
 
-_.extend(DetailsView.prototype, Scrollable);
-_.extend(DetailsView.prototype, Copyable);
+    autoType() {
+        Events.emit('auto-type', { entry: this.model });
+    }
 
-module.exports = DetailsView;
+    fieldAutoType(e) {
+        Events.emit('auto-type', {
+            entry: this.model,
+            sequence: e.source.model.sequence
+        });
+    }
+}
+
+Object.assign(DetailsView.prototype, Scrollable);
+Object.assign(DetailsView.prototype, Copyable);
+
+export { DetailsView };

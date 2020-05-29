@@ -1,19 +1,22 @@
-const FieldView = require('./field-view');
-const Locale = require('../../util/locale');
+import { Locale } from 'util/locale';
+import { FieldView } from 'views/fields/field-view';
 
-const FieldViewHistory = FieldView.extend({
-    renderValue: function(value) {
+class FieldViewHistory extends FieldView {
+    readonly = true;
+
+    renderValue(value) {
         if (!value.length) {
             return Locale.detHistoryEmpty;
         }
-        let text = value.length + ' ' + (value.length % 10 === 1 ? Locale.detHistoryRec : Locale.detHistoryRecs);
+        let text =
+            value.length +
+            ' ' +
+            (value.length === 1 ? Locale.detHistoryRec : Locale.detHistoryRecs);
         if (value.unsaved) {
             text += ' (' + Locale.detHistoryModified + ')';
         }
         return '<a class="details__history-link">' + text + '</a>';
-    },
+    }
+}
 
-    readonly: true
-});
-
-module.exports = FieldViewHistory;
+export { FieldViewHistory };

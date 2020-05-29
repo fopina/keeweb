@@ -1,4 +1,4 @@
-const Launcher = require('../comp/launcher');
+import { Launcher } from 'comp/launcher';
 
 const IoFileCache = function(config) {
     this.basePath = null;
@@ -6,7 +6,7 @@ const IoFileCache = function(config) {
     this.logger = config.logger;
 };
 
-_.extend(IoFileCache.prototype, {
+Object.assign(IoFileCache.prototype, {
     initFs(callback) {
         if (this.basePath) {
             return callback();
@@ -37,10 +37,14 @@ _.extend(IoFileCache.prototype, {
             Launcher.writeFile(path, data, err => {
                 if (err) {
                     this.logger.error('Error saving file', id, err);
-                    if (callback) { callback(err); }
+                    if (callback) {
+                        callback(err);
+                    }
                 } else {
                     this.logger.debug('Saved', id, this.logger.ts(ts));
-                    if (callback) { callback(); }
+                    if (callback) {
+                        callback();
+                    }
                 }
             });
         });
@@ -57,10 +61,14 @@ _.extend(IoFileCache.prototype, {
             Launcher.readFile(path, undefined, (data, err) => {
                 if (err) {
                     this.logger.error('Error loading file', id, err);
-                    if (callback) { callback(err); }
+                    if (callback) {
+                        callback(err);
+                    }
                 } else {
                     this.logger.debug('Loaded', id, this.logger.ts(ts));
-                    if (callback) { callback(null, data); }
+                    if (callback) {
+                        callback(null, data);
+                    }
                 }
             });
         });
@@ -77,14 +85,18 @@ _.extend(IoFileCache.prototype, {
             Launcher.deleteFile(path, err => {
                 if (err) {
                     this.logger.error('Error removing file', id, err);
-                    if (callback) { callback(err); }
+                    if (callback) {
+                        callback(err);
+                    }
                 } else {
                     this.logger.debug('Removed', id, this.logger.ts(ts));
-                    if (callback) { callback(); }
+                    if (callback) {
+                        callback();
+                    }
                 }
             });
         });
     }
 });
 
-module.exports = IoFileCache;
+export { IoFileCache };

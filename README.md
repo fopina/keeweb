@@ -12,15 +12,15 @@ Timeline: [Release Notes](release-notes.md), [TODO](https://github.com/keeweb/ke
 On one page: [Features](https://keeweb.info/#features), [FAQ](https://github.com/keeweb/keeweb/wiki/FAQ)  
 Website: [keeweb.info](https://keeweb.info)  
 Twitter: [kee_web](https://twitter.com/kee_web)  
+Donate: [OpenCollective](https://opencollective.com/keeweb#support), [GitHub](https://github.com/sponsors/antelle)  
 
 # Status
 
-The app is already rather stable, so basic stuff should work.  
-Project roadmap with planned features and approximate schedule is on [TODO](https://github.com/keeweb/keeweb/wiki/TODO) page.
+The app is quite stable now. Basic stuff, as well as more advanced operations, should be rather reliable.
 
 # Self-hosting
 
-Everything you need to host this app on your server is any static file server. The app is a single HTML file + cache manifest (optionally; for offline access).
+Everything you need to host this app on your server is any static file server. The app is a single HTML file + a service worker (optionally; for offline access).
 You can download the latest distribution files from [gh-pages](https://github.com/keeweb/keeweb/archive/gh-pages.zip) branch.  
 
 If you are using Docker:
@@ -45,20 +45,22 @@ Desktop apps are built with `grunt desktop`. This works only in macOS as it buil
 Also, a hardware token is required.  
 To run Electron app without building an installer, build the app with `grunt` and start it this way:
 ```bash
-grunt dev
-npm run-script electron
+npm run dev
+npm run electron
 ```
 
 For debug build:
 
-1. run `grunt dev`
-2. open `http://localhost:8085/tmp`
+1. run `npm run dev`
+2. open `http://localhost:8085`
 
 # Contributing
 
 Please read contribution guidelines [for pull requests](.github/PULL_REQUEST_TEMPLATE.md).  
 Here's a [list of issues](https://github.com/keeweb/keeweb/labels/help%20wanted) where your help would be very welcome.
 Also you can help by [translating KeeWeb](https://keeweb.oneskyapp.com) to your language.  
+
+Other ways of contribution can be found [on this page](CONTRIBUTING.md).
 
 ### Important notes for pull requests
 
@@ -69,7 +71,9 @@ Also you can help by [translating KeeWeb](https://keeweb.oneskyapp.com) to your 
 
 KeeWeb is not free to develop. It takes time, requires paid code signing certificates and domains.  
 You can help the project or say "thank you" with this button:  
-[<img src="img/paypal-donate.png" alt="Donate with PayPal" width="100">](https://www.paypal.me/dvitkovsky)  
+[<img src="https://opencollective.com/keeweb/tiers/backer.svg?avatarHeight=42&width=880" alt="OpenCollective">](https://opencollective.com/keeweb#support)
+
+You can also sponsor the developer directly [on GitHub](https://github.com/sponsors/antelle).  
 
 Please note: donation does not imply any type of service contract.  
 

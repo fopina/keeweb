@@ -1,4 +1,4 @@
-<div>
+<div class="settings__content">
     <h1><i class="fa fa-cog"></i> {{res 'setGenTitle'}}</h1>
 
     {{#if updateWaitingReload}}
@@ -148,6 +148,15 @@
         <label for="settings__general-direct-autotype">{{res 'setGenDirectAutotype'}}</label>
     </div>
     {{/if}}
+    <div>
+        <input type="checkbox" class="settings__input input-base settings__general-use-markdown" id="settings__general-use-markdown" {{#if useMarkdown}}checked{{/if}} />
+        <label for="settings__general-use-markdown">{{res 'setGenUseMarkdown'}}</label>
+    </div>
+    <div>
+        <input type="checkbox" class="settings__input input-base settings__general-use-group-icon-for-entries"
+               id="settings__general-use-group-icon-for-entries" {{#if useGroupIconForEntries}}checked{{/if}} />
+        <label for="settings__general-use-group-icon-for-entries">{{res 'setGenUseGroupIconForEntries'}}</label>
+    </div>
 
     <h2>{{res 'setGenLock'}}</h2>
     <div>
@@ -157,6 +166,7 @@
             <option value="5" {{#ifeq idleMinutes 5}}selected{{/ifeq}}>{{#res 'setGenLockMinutes'}}5{{/res}}</option>
             <option value="10" {{#ifeq idleMinutes 10}}selected{{/ifeq}}>{{#res 'setGenLockMinutes'}}10{{/res}}</option>
             <option value="15" {{#ifeq idleMinutes 15}}selected{{/ifeq}}>{{#res 'setGenLockMinutes'}}15{{/res}}</option>
+            <option value="30" {{#ifeq idleMinutes 30}}selected{{/ifeq}}>{{#res 'setGenLockMinutes'}}30{{/res}}</option>
             <option value="60" {{#ifeq idleMinutes 60}}selected{{/ifeq}}>{{res 'setGenLockHour'}}</option>
             <option value="720" {{#ifeq idleMinutes 720}}selected{{/ifeq}}>{{#res 'setGenLockHours'}}12{{/res}}</option>
             <option value="1440" {{#ifeq idleMinutes 1440}}selected{{/ifeq}}>{{res 'setGenLockDay'}}</option>
@@ -195,6 +205,8 @@
             data-storage="{{prv.name}}" {{#if prv.enabled}}checked{{/if}}
     /><label for="settings__general-prv-check-{{prv.name}}">{{res prv.name}}</label></h4>
     <div class="settings__general-prv-wrap settings__general-{{prv.name}} {{#ifeq prv.enabled false}}hide{{/ifeq}}"></div>
+    {{#if prv.loggedIn}}<button class="btn-silent settings__general-prv-logout"
+                                data-storage="{{prv.name}}">{{res 'setGenStorageLogout'}}</button>{{/if}}
     {{/each}}
 
     <h2>{{res 'advanced'}}</h2>

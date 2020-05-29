@@ -1,6 +1,6 @@
 # KeeWeb official docker container
 # https://keeweb.info
-# (C) Antelle 2017, MIT license https://github.com/keeweb/keeweb
+# (C) Antelle 2019, MIT license https://github.com/keeweb/keeweb
 # Based on nginx-ssl-secure https://github.com/MarvAmBass/docker-nginx-ssl-secure/
 
 # Building locally:
@@ -14,10 +14,10 @@
 # docker run --name keeweb -d -p 443:443 -p 80:80 -e 'DH_SIZE=512' antelle/keeweb
 
 FROM nginx:stable
-MAINTAINER Antelle "antelle.net@gmail.com"
+LABEL maintainer="antelle.net@gmail.com"
 
 # install
-RUN apt-get -y update && apt-get -y install openssl wget unzip
+RUN apt-get -y update && apt-get -y install openssl curl unzip
 
 # setup nginx
 RUN rm -rf /etc/nginx/conf.d/*; \
@@ -32,20 +32,17 @@ ADD keeweb.conf /etc/nginx/conf.d/keeweb.conf
 ADD entrypoint.sh /opt/entrypoint.sh
 RUN chmod a+x /opt/entrypoint.sh
 
-# clone keeweb
-RUN wget https://github.com/keeweb/keeweb/archive/gh-pages.zip; \
-    unzip gh-pages.zip; \
-    rm gh-pages.zip; \
-    mv keeweb-gh-pages keeweb; \
-    rm keeweb/CNAME
+# add keeweb files
+ADD dist keeweb
 
 # clone keeweb plugins
-RUN wget https://github.com/keeweb/keeweb-plugins/archive/master.zip; \
+RUN curl -Ss -L -O https://github.com/keeweb/keeweb-plugins/archive/master.zip; \
     unzip master.zip; \
     rm master.zip; \
     mv keeweb-plugins-master/docs keeweb/plugins; \
-    rm -rf keeweb-plugins-master \
-    rm keeweb/plugins/CNAME
+    rm -rf keeweb-plugins-master;
+
+RUN apt-get -y remove curl unzip
 
 ENTRYPOINT ["/opt/entrypoint.sh"]
 CMD ["nginx"]

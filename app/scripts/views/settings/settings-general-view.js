@@ -1,25 +1,28 @@
-const Backbone = require('backbone');
-const SettingsPrvView = require('./settings-prv-view');
-const SettingsLogsView = require('./settings-logs-view');
-const Launcher = require('../../comp/launcher');
-const Updater = require('../../comp/updater');
-const Format = require('../../util/format');
-const AppSettingsModel = require('../../models/app-settings-model');
-const UpdateModel = require('../../models/update-model');
-const RuntimeInfo = require('../../comp/runtime-info');
-const Alerts = require('../../comp/alerts');
-const SettingsManager = require('../../comp/settings-manager');
-const Storage = require('../../storage');
-const FeatureDetector = require('../../util/feature-detector');
-const Locale = require('../../util/locale');
-const SemVer = require('../../util/semver');
-const Links = require('../../const/links');
-const AutoType = require('../../auto-type');
+import { Events } from 'framework/events';
+import { View } from 'framework/views/view';
+import { AutoType } from 'auto-type';
+import { Storage } from 'storage';
+import { RuntimeInfo } from 'const/runtime-info';
+import { Updater } from 'comp/app/updater';
+import { Launcher } from 'comp/launcher';
+import { SettingsManager } from 'comp/settings/settings-manager';
+import { Alerts } from 'comp/ui/alerts';
+import { Links } from 'const/links';
+import { AppSettingsModel } from 'models/app-settings-model';
+import { UpdateModel } from 'models/update-model';
+import { SemVer } from 'util/data/semver';
+import { Features } from 'util/features';
+import { DateFormat } from 'util/formatting/date-format';
+import { Locale } from 'util/locale';
+import { SettingsLogsView } from 'views/settings/settings-logs-view';
+import { SettingsPrvView } from 'views/settings/settings-prv-view';
+import { mapObject } from 'util/fn';
+import template from 'templates/settings/settings-general.hbs';
 
-const SettingsGeneralView = Backbone.View.extend({
-    template: require('templates/settings/settings-general.hbs'),
+class SettingsGeneralView extends View {
+    template = template;
 
-    events: {
+    events = {
         'change .settings__general-theme': 'changeTheme',
         'change .settings__general-locale': 'changeLocale',
         'change .settings__general-font-size': 'changeFontSize',
@@ -37,6 +40,8 @@ const SettingsGeneralView = Backbone.View.extend({
         'change .settings__general-lock-on-os-lock': 'changeLockOnOsLock',
         'change .settings__general-table-view': 'changeTableView',
         'change .settings__general-colorful-icons': 'changeColorfulIcons',
+        'change .settings__general-use-markdown': 'changeUseMarkdown',
+        'change .settings__general-use-group-icon-for-entries': 'changeUseGroupIconForEntries',
         'change .settings__general-direct-autotype': 'changeDirectAutotype',
         'change .settings__general-titlebar-style': 'changeTitlebarStyle',
         'click .settings__general-update-btn': 'checkUpdate',
@@ -44,42 +49,41 @@ const SettingsGeneralView = Backbone.View.extend({
         'click .settings__general-download-update-btn': 'downloadUpdate',
         'click .settings__general-update-found-btn': 'installFoundUpdate',
         'change .settings__general-prv-check': 'changeStorageEnabled',
+        'click .settings__general-prv-logout': 'logoutFromStorage',
         'click .settings__general-show-advanced': 'showAdvancedSettings',
         'click .settings__general-dev-tools-link': 'openDevTools',
         'click .settings__general-try-beta-link': 'tryBeta',
         'click .settings__general-show-logs-link': 'showLogs',
         'click .settings__general-reload-app-link': 'reloadApp'
-    },
+    };
 
-    views: null,
+    constructor(model, options) {
+        super(model, options);
+        this.listenTo(UpdateModel, 'change:status', this.render);
+        this.listenTo(UpdateModel, 'change:updateStatus', this.render);
+    }
 
-    initialize: function() {
-        this.views = {};
-        this.listenTo(UpdateModel.instance, 'change:status', this.render, this);
-        this.listenTo(UpdateModel.instance, 'change:updateStatus', this.render, this);
-    },
-
-    render: function() {
-        const updateReady = UpdateModel.instance.get('updateStatus') === 'ready';
-        const updateFound = UpdateModel.instance.get('updateStatus') === 'found';
-        const updateManual = UpdateModel.instance.get('updateManual');
+    render() {
+        const updateReady = UpdateModel.updateStatus === 'ready';
+        const updateFound = UpdateModel.updateStatus === 'found';
+        const updateManual = UpdateModel.updateManual;
         const storageProviders = this.getStorageProviders();
 
-        this.renderTemplate({
-            themes: _.mapObject(SettingsManager.allThemes, theme => Locale[theme]),
-            activeTheme: AppSettingsModel.instance.get('theme'),
+        super.render({
+            themes: mapObject(SettingsManager.allThemes, theme => Locale[theme]),
+            activeTheme: AppSettingsModel.theme,
             locales: SettingsManager.allLocales,
             activeLocale: SettingsManager.activeLocale,
-            fontSize: AppSettingsModel.instance.get('fontSize'),
-            expandGroups: AppSettingsModel.instance.get('expandGroups'),
+            fontSize: AppSettingsModel.fontSize,
+            expandGroups: AppSettingsModel.expandGroups,
             canClearClipboard: !!Launcher,
-            clipboardSeconds: AppSettingsModel.instance.get('clipboardSeconds'),
-            rememberKeyFiles: AppSettingsModel.instance.get('rememberKeyFiles'),
+            clipboardSeconds: AppSettingsModel.clipboardSeconds,
+            rememberKeyFiles: AppSettingsModel.rememberKeyFiles,
             supportFiles: !!Launcher,
-            autoSave: AppSettingsModel.instance.get('autoSave'),
-            autoSaveInterval: AppSettingsModel.instance.get('autoSaveInterval'),
-            idleMinutes: AppSettingsModel.instance.get('idleMinutes'),
-            minimizeOnClose: AppSettingsModel.instance.get('minimizeOnClose'),
+            autoSave: AppSettingsModel.autoSave,
+            autoSaveInterval: AppSettingsModel.autoSaveInterval,
+            idleMinutes: AppSettingsModel.idleMinutes,
+            minimizeOnClose: AppSettingsModel.minimizeOnClose,
             devTools: Launcher && Launcher.devTools,
             canAutoUpdate: Updater.enabled,
             canAutoSaveOnClose: !!Launcher,
@@ -87,69 +91,85 @@ const SettingsGeneralView = Backbone.View.extend({
             canDetectMinimize: !!Launcher,
             canDetectOsSleep: Launcher && Launcher.canDetectOsSleep(),
             canAutoType: AutoType.enabled,
-            lockOnMinimize: Launcher && AppSettingsModel.instance.get('lockOnMinimize'),
-            lockOnCopy: AppSettingsModel.instance.get('lockOnCopy'),
-            lockOnAutoType: AppSettingsModel.instance.get('lockOnAutoType'),
-            lockOnOsLock: AppSettingsModel.instance.get('lockOnOsLock'),
-            tableView: AppSettingsModel.instance.get('tableView'),
-            canSetTableView: !FeatureDetector.isMobile,
+            lockOnMinimize: Launcher && AppSettingsModel.lockOnMinimize,
+            lockOnCopy: AppSettingsModel.lockOnCopy,
+            lockOnAutoType: AppSettingsModel.lockOnAutoType,
+            lockOnOsLock: AppSettingsModel.lockOnOsLock,
+            tableView: AppSettingsModel.tableView,
+            canSetTableView: !Features.isMobile,
             autoUpdate: Updater.getAutoUpdateType(),
             updateInProgress: Updater.updateInProgress(),
             updateInfo: this.getUpdateInfo(),
             updateWaitingReload: updateReady && !Launcher,
             showUpdateBlock: Updater.enabled && !updateManual,
-            updateReady: updateReady,
-            updateFound: updateFound,
-            updateManual: updateManual,
+            updateReady,
+            updateFound,
+            updateManual,
             releaseNotesLink: Links.ReleaseNotes,
-            colorfulIcons: AppSettingsModel.instance.get('colorfulIcons'),
-            directAutotype: AppSettingsModel.instance.get('directAutotype'),
-            supportsTitleBarStyles: Launcher && FeatureDetector.supportsTitleBarStyles(),
-            titlebarStyle: AppSettingsModel.instance.get('titlebarStyle'),
-            storageProviders: storageProviders,
-            showReloadApp: FeatureDetector.isStandalone
+            colorfulIcons: AppSettingsModel.colorfulIcons,
+            useMarkdown: AppSettingsModel.useMarkdown,
+            useGroupIconForEntries: AppSettingsModel.useGroupIconForEntries,
+            directAutotype: AppSettingsModel.directAutotype,
+            supportsTitleBarStyles: Launcher && Features.supportsTitleBarStyles(),
+            titlebarStyle: AppSettingsModel.titlebarStyle,
+            storageProviders,
+            showReloadApp: Features.isStandalone
         });
         this.renderProviderViews(storageProviders);
-    },
+    }
 
-    renderProviderViews: function(storageProviders) {
+    renderProviderViews(storageProviders) {
         storageProviders.forEach(function(prv) {
             if (this.views[prv.name]) {
                 this.views[prv.name].remove();
             }
             if (prv.hasConfig) {
-                this.views[prv.name] = new SettingsPrvView({
-                    el: this.$el.find('.settings__general-' + prv.name),
-                    model: prv
-                }).render();
+                const prvView = new SettingsPrvView(prv, {
+                    parent: this.$el.find('.settings__general-' + prv.name)[0]
+                });
+                this.views[prv.name] = prvView;
+                prvView.render();
             }
         }, this);
-    },
+    }
 
-    getUpdateInfo: function() {
-        switch (UpdateModel.instance.get('status')) {
+    getUpdateInfo() {
+        switch (UpdateModel.status) {
             case 'checking':
                 return Locale.setGenUpdateChecking + '...';
-            case 'error':
+            case 'error': {
                 let errMsg = Locale.setGenErrorChecking;
-                if (UpdateModel.instance.get('lastError')) {
-                    errMsg += ': ' + UpdateModel.instance.get('lastError');
+                if (UpdateModel.lastError) {
+                    errMsg += ': ' + UpdateModel.lastError;
                 }
-                if (UpdateModel.instance.get('lastSuccessCheckDate')) {
-                    errMsg += '. ' + Locale.setGenLastCheckSuccess.replace('{}', Format.dtStr(UpdateModel.instance.get('lastSuccessCheckDate'))) +
-                        ': ' + Locale.setGenLastCheckVer.replace('{}', UpdateModel.instance.get('lastVersion'));
+                if (UpdateModel.lastSuccessCheckDate) {
+                    errMsg +=
+                        '. ' +
+                        Locale.setGenLastCheckSuccess.replace(
+                            '{}',
+                            DateFormat.dtStr(UpdateModel.lastSuccessCheckDate)
+                        ) +
+                        ': ' +
+                        Locale.setGenLastCheckVer.replace('{}', UpdateModel.lastVersion);
                 }
                 return errMsg;
-            case 'ok':
-                let msg = Locale.setGenCheckedAt + ' ' + Format.dtStr(UpdateModel.instance.get('lastCheckDate')) + ': ';
-                const cmp = SemVer.compareVersions(RuntimeInfo.version, UpdateModel.instance.get('lastVersion'));
+            }
+            case 'ok': {
+                let msg =
+                    Locale.setGenCheckedAt +
+                    ' ' +
+                    DateFormat.dtStr(UpdateModel.lastCheckDate) +
+                    ': ';
+                const cmp = SemVer.compareVersions(RuntimeInfo.version, UpdateModel.lastVersion);
                 if (cmp >= 0) {
                     msg += Locale.setGenLatestVer;
                 } else {
-                    msg += Locale.setGenNewVer.replace('{}', UpdateModel.instance.get('lastVersion')) + ' ' +
-                        Format.dStr(UpdateModel.instance.get('lastVersionReleaseDate'));
+                    msg +=
+                        Locale.setGenNewVer.replace('{}', UpdateModel.lastVersion) +
+                        ' ' +
+                        DateFormat.dStr(UpdateModel.lastVersionReleaseDate);
                 }
-                switch (UpdateModel.instance.get('updateStatus')) {
+                switch (UpdateModel.updateStatus) {
                     case 'downloading':
                         return msg + '. ' + Locale.setGenDownloadingUpdate;
                     case 'extracting':
@@ -158,12 +178,13 @@ const SettingsGeneralView = Backbone.View.extend({
                         return msg + '. ' + Locale.setGenCheckErr;
                 }
                 return msg;
+            }
             default:
                 return Locale.setGenNeverChecked;
         }
-    },
+    }
 
-    getStorageProviders: function() {
+    getStorageProviders() {
         const storageProviders = [];
         Object.keys(Storage).forEach(name => {
             const prv = Storage[name];
@@ -175,161 +196,188 @@ const SettingsGeneralView = Backbone.View.extend({
         return storageProviders.map(sp => ({
             name: sp.name,
             enabled: sp.enabled,
-            hasConfig: sp.getSettingsConfig
+            hasConfig: !!sp.getSettingsConfig,
+            loggedIn: sp.loggedIn
         }));
-    },
+    }
 
-    changeTheme: function(e) {
+    changeTheme(e) {
         const theme = e.target.value;
-        AppSettingsModel.instance.set('theme', theme);
-    },
+        AppSettingsModel.theme = theme;
+    }
 
-    changeLocale: function(e) {
+    changeLocale(e) {
         const locale = e.target.value;
         if (locale === '...') {
-            e.target.value = AppSettingsModel.instance.get('locale') || 'en';
-            this.appModel.menu.select({ item: this.appModel.menu.pluginsSection.get('items').first() });
+            e.target.value = AppSettingsModel.locale || 'en';
+            this.appModel.menu.select({
+                item: this.appModel.menu.pluginsSection.items[0]
+            });
             return;
         }
-        AppSettingsModel.instance.set('locale', locale);
-    },
+        AppSettingsModel.locale = locale;
+    }
 
-    changeFontSize: function(e) {
+    changeFontSize(e) {
         const fontSize = +e.target.value;
-        AppSettingsModel.instance.set('fontSize', fontSize);
-    },
+        AppSettingsModel.fontSize = fontSize;
+    }
 
-    changeTitlebarStyle: function(e) {
+    changeTitlebarStyle(e) {
         const titlebarStyle = e.target.value;
-        AppSettingsModel.instance.set('titlebarStyle', titlebarStyle);
-    },
+        AppSettingsModel.titlebarStyle = titlebarStyle;
+    }
 
-    changeClipboard: function(e) {
+    changeClipboard(e) {
         const clipboardSeconds = +e.target.value;
-        AppSettingsModel.instance.set('clipboardSeconds', clipboardSeconds);
-    },
+        AppSettingsModel.clipboardSeconds = clipboardSeconds;
+    }
 
-    changeIdleMinutes: function(e) {
+    changeIdleMinutes(e) {
         const idleMinutes = +e.target.value;
-        AppSettingsModel.instance.set('idleMinutes', idleMinutes);
-    },
+        AppSettingsModel.idleMinutes = idleMinutes;
+    }
 
-    changeAutoUpdate: function(e) {
+    changeAutoUpdate(e) {
         const autoUpdate = e.target.value || false;
-        AppSettingsModel.instance.set('autoUpdate', autoUpdate);
+        AppSettingsModel.autoUpdate = autoUpdate;
         if (autoUpdate) {
             Updater.scheduleNextCheck();
         }
-    },
+    }
 
-    checkUpdate: function() {
+    checkUpdate() {
         Updater.check(true);
-    },
+    }
 
-    changeAutoSave: function(e) {
+    changeAutoSave(e) {
         const autoSave = e.target.checked || false;
-        AppSettingsModel.instance.set('autoSave', autoSave);
-    },
+        AppSettingsModel.autoSave = autoSave;
+    }
 
-    changeAutoSaveInterval: function(e) {
+    changeAutoSaveInterval(e) {
         const autoSaveInterval = Number(e.target.value) || 0;
-        AppSettingsModel.instance.set('autoSaveInterval', autoSaveInterval);
-    },
+        AppSettingsModel.autoSaveInterval = autoSaveInterval;
+    }
 
-    changeRememberKeyFiles: function(e) {
+    changeRememberKeyFiles(e) {
         const rememberKeyFiles = e.target.value || false;
-        AppSettingsModel.instance.set('rememberKeyFiles', rememberKeyFiles);
+        AppSettingsModel.rememberKeyFiles = rememberKeyFiles;
         this.appModel.clearStoredKeyFiles();
-    },
+    }
 
-    changeMinimize: function(e) {
+    changeMinimize(e) {
         const minimizeOnClose = e.target.checked || false;
-        AppSettingsModel.instance.set('minimizeOnClose', minimizeOnClose);
-    },
+        AppSettingsModel.minimizeOnClose = minimizeOnClose;
+    }
 
-    changeLockOnMinimize: function(e) {
+    changeLockOnMinimize(e) {
         const lockOnMinimize = e.target.checked || false;
-        AppSettingsModel.instance.set('lockOnMinimize', lockOnMinimize);
-    },
+        AppSettingsModel.lockOnMinimize = lockOnMinimize;
+    }
 
-    changeLockOnCopy: function(e) {
+    changeLockOnCopy(e) {
         const lockOnCopy = e.target.checked || false;
-        AppSettingsModel.instance.set('lockOnCopy', lockOnCopy);
-    },
+        AppSettingsModel.lockOnCopy = lockOnCopy;
+    }
 
-    changeLockOnAutoType: function(e) {
+    changeLockOnAutoType(e) {
         const lockOnAutoType = e.target.checked || false;
-        AppSettingsModel.instance.set('lockOnAutoType', lockOnAutoType);
-    },
+        AppSettingsModel.lockOnAutoType = lockOnAutoType;
+    }
 
-    changeLockOnOsLock: function(e) {
+    changeLockOnOsLock(e) {
         const lockOnOsLock = e.target.checked || false;
-        AppSettingsModel.instance.set('lockOnOsLock', lockOnOsLock);
-    },
+        AppSettingsModel.lockOnOsLock = lockOnOsLock;
+    }
 
-    changeTableView: function(e) {
+    changeTableView(e) {
         const tableView = e.target.checked || false;
-        AppSettingsModel.instance.set('tableView', tableView);
-        Backbone.trigger('refresh');
-    },
+        AppSettingsModel.tableView = tableView;
+        Events.emit('refresh');
+    }
 
-    changeColorfulIcons: function(e) {
+    changeColorfulIcons(e) {
         const colorfulIcons = e.target.checked || false;
-        AppSettingsModel.instance.set('colorfulIcons', colorfulIcons);
-        Backbone.trigger('refresh');
-    },
+        AppSettingsModel.colorfulIcons = colorfulIcons;
+        Events.emit('refresh');
+    }
 
-    changeDirectAutotype: function(e) {
+    changeUseMarkdown(e) {
+        const useMarkdown = e.target.checked || false;
+        AppSettingsModel.useMarkdown = useMarkdown;
+        Events.emit('refresh');
+    }
+
+    changeUseGroupIconForEntries(e) {
+        const useGroupIconForEntries = e.target.checked || false;
+        AppSettingsModel.useGroupIconForEntries = useGroupIconForEntries;
+        Events.emit('refresh');
+    }
+
+    changeDirectAutotype(e) {
         const directAutotype = e.target.checked || false;
-        AppSettingsModel.instance.set('directAutotype', directAutotype);
-        Backbone.trigger('refresh');
-    },
+        AppSettingsModel.directAutotype = directAutotype;
+        Events.emit('refresh');
+    }
 
-    restartApp: function() {
+    restartApp() {
         if (Launcher) {
             Launcher.requestRestart();
         } else {
             window.location.reload();
         }
-    },
+    }
 
-    downloadUpdate: function() {
+    downloadUpdate() {
         Launcher.openLink(Links.Desktop);
-    },
+    }
 
-    installFoundUpdate: function() {
+    installFoundUpdate() {
         Updater.update(true, () => {
             Launcher.requestRestart();
         });
-    },
+    }
 
-    changeExpandGroups: function(e) {
+    changeExpandGroups(e) {
         const expand = e.target.checked;
-        AppSettingsModel.instance.set('expandGroups', expand);
-        Backbone.trigger('refresh');
-    },
+        AppSettingsModel.expandGroups = expand;
+        Events.emit('refresh');
+    }
 
-    changeStorageEnabled: function(e) {
+    changeStorageEnabled(e) {
         const storage = Storage[$(e.target).data('storage')];
         if (storage) {
             storage.setEnabled(e.target.checked);
-            AppSettingsModel.instance.set(storage.name, storage.enabled);
-            this.$el.find('.settings__general-' + storage.name).toggleClass('hide', !e.target.checked);
+            AppSettingsModel[storage.name] = storage.enabled;
+            this.$el
+                .find('.settings__general-' + storage.name)
+                .toggleClass('hide', !e.target.checked);
         }
-    },
+    }
 
-    showAdvancedSettings: function() {
-        this.$el.find('.settings__general-show-advanced, .settings__general-advanced').toggleClass('hide');
+    logoutFromStorage(e) {
+        const storage = Storage[$(e.target).data('storage')];
+        if (storage) {
+            storage.logout();
+            $(e.target).remove();
+        }
+    }
+
+    showAdvancedSettings() {
+        this.$el
+            .find('.settings__general-show-advanced, .settings__general-advanced')
+            .toggleClass('hide');
         this.scrollToBottom();
-    },
+    }
 
-    openDevTools: function() {
+    openDevTools() {
         if (Launcher) {
             Launcher.openDevTools();
         }
-    },
+    }
 
-    tryBeta: function() {
+    tryBeta() {
         if (this.appModel.files.hasUnsavedFiles()) {
             Alerts.info({
                 header: Locale.setGenTryBetaWarning,
@@ -338,23 +386,24 @@ const SettingsGeneralView = Backbone.View.extend({
         } else {
             location.href = Links.BetaWebApp;
         }
-    },
+    }
 
-    showLogs: function() {
+    showLogs() {
         if (this.views.logView) {
             this.views.logView.remove();
         }
-        this.views.logView = new SettingsLogsView({ el: this.$el.find('.settings__general-advanced') }).render();
+        this.views.logView = new SettingsLogsView();
+        this.views.logView.render();
         this.scrollToBottom();
-    },
+    }
 
-    reloadApp: function() {
+    reloadApp() {
         location.reload();
-    },
+    }
 
-    scrollToBottom: function() {
+    scrollToBottom() {
         this.$el.closest('.scroller').scrollTop(this.$el.height());
     }
-});
+}
 
-module.exports = SettingsGeneralView;
+export { SettingsGeneralView };
